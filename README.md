@@ -66,10 +66,6 @@
 - **Whisper** - 用于语音转文字
 - 其他 Python 依赖（moviepy、streamlit 等）
 
-运行 `uv sync --extra speakers` 时额外安装（说话人识别功能）：
-- **WhisperX** - 更快的转录引擎，支持说话人分离
-- **pyannote.audio** - 说话人分离模型
-
 ## 🚀 快速开始
 
 ### 1. 克隆和设置
@@ -236,7 +232,7 @@ uv run python video_orchestrator.py --speaker-references references/ "VIDEO_URL_
 | `--skip-download` | 跳过下载，使用已下载的视频 | 关 |
 | `--skip-analysis` | 跳过分析，使用已有分析结果 | 关 |
 | `--skip-clips` | 不生成剪辑 | 关 |
-| `--skip-titles` | 不添加艺术标题 | 关 |
+| `--add-titles` | 添加艺术标题到剪辑 | 关 |
 | `--skip-cover` | 不生成封面图片 | 关 |
 | `-f`, `--filename` | 自定义输出文件名模板 | 无 |
 | `-v`, `--verbose` | 开启详细日志 | 关 |
@@ -378,7 +374,7 @@ AI 分析（每个片段）
 **原因**：FFmpeg 未安装或不在 PATH 中。运行 `ffmpeg -version` 检查，缺失则安装（macOS: `brew install ffmpeg`）。
 
 ### 内存问题
-**原因**：视频过长。尝试 `--max-duration 10` 缩短分割时长，或 `--skip-titles` 分阶段处理。
+**原因**：视频过长。尝试 `--max-duration 10` 缩短分割时长，或不使用 `--add-titles` 分阶段处理。
 
 ### 说话人识别不工作
 

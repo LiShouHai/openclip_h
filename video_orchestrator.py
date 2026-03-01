@@ -53,7 +53,7 @@ class VideoOrchestrator:
                 llm_provider: str = DEFAULT_LLM_PROVIDER,
                 skip_analysis: bool = False,
                 generate_clips: bool = True,
-                add_titles: bool = True,
+                add_titles: bool = False,
                 title_style: str = DEFAULT_TITLE_STYLE,
                 title_font_size: str = 'medium',
                 use_background: bool = False,
@@ -918,8 +918,8 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
                        help='Include background information (streamer names, nicknames) in analysis prompts')
     parser.add_argument('--skip-clips', action='store_true',
                        help='Skip clip generation from engaging moments')
-    parser.add_argument('--skip-titles', action='store_true',
-                       help='Skip adding titles to clips')
+    parser.add_argument('--add-titles', action='store_true',
+                       help='Add artistic titles to clips (disabled by default)')
     parser.add_argument('--skip-cover', action='store_true',
                        help='Skip cover image generation')
     parser.add_argument('--max-clips', type=int, default=MAX_CLIPS,
@@ -984,7 +984,7 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
         llm_provider=args.llm_provider,
         skip_analysis=args.skip_analysis,
         generate_clips=not args.skip_clips,
-        add_titles=not args.skip_titles,
+        add_titles=args.add_titles,
         title_style=args.title_style,
         title_font_size=args.title_font_size,
         use_background=args.use_background,

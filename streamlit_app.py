@@ -197,7 +197,7 @@ DEFAULT_DATA = {
     'force_whisper': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
-    'add_titles': True,
+    'add_titles': False,
     'generate_cover': True,
     # Other form elements
     'input_type': "Video URL",
@@ -590,14 +590,6 @@ with st.sidebar:
     data['speaker_references_dir'] = speaker_references_dir
 
     # Checkboxes for additional options
-    add_titles = st.checkbox(
-        t['add_titles'],
-        value=data['add_titles'],
-        help=t['add_titles_help'],
-        key=f"add_titles_{st.session_state.reset_counter}"
-    )
-    data['add_titles'] = add_titles
-    
     generate_cover = st.checkbox(
         t['generate_cover'],
         value=data['generate_cover'],
@@ -605,6 +597,14 @@ with st.sidebar:
         key=f"generate_cover_{st.session_state.reset_counter}"
     )
     data['generate_cover'] = generate_cover
+    
+    add_titles = st.checkbox(
+        t['add_titles'],
+        value=data['add_titles'],
+        help=t['add_titles_help'],
+        key=f"add_titles_{st.session_state.reset_counter}"
+    )
+    data['add_titles'] = add_titles
 
     use_background = st.checkbox(
         t['use_background'],

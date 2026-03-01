@@ -66,10 +66,6 @@ The following are installed automatically when you run `uv sync`:
 - **Whisper** - For speech-to-text transcription
 - Other Python dependencies (moviepy, streamlit, etc.)
 
-Run `uv sync --extra speakers` to additionally install (for speaker identification):
-- **WhisperX** - Faster transcription engine with speaker diarization support
-- **pyannote.audio** - Speaker diarization model
-
 ## 🚀 Quick Start
 
 ### 1. Clone and Setup
@@ -236,7 +232,7 @@ uv run python video_orchestrator.py --speaker-references references/ "VIDEO_URL_
 | `--skip-download` | Skip download, use existing video | Off |
 | `--skip-analysis` | Skip analysis, use existing results | Off |
 | `--skip-clips` | Don't generate clips | Off |
-| `--skip-titles` | Don't add artistic titles | Off |
+| `--add-titles` | Add artistic titles to clips | Off |
 | `--skip-cover` | Don't generate cover images | Off |
 | `-f`, `--filename` | Custom output filename template | None |
 | `-v`, `--verbose` | Enable verbose logging | Off |
@@ -272,7 +268,7 @@ uv run python video_orchestrator.py \
 
 **Analysis only, no clip generation:**
 ```bash
-uv run python video_orchestrator.py --skip-clips --skip-titles "VIDEO_URL"
+uv run python video_orchestrator.py --skip-clips "VIDEO_URL"
 ```
 
 **Speaker identification (Preview):**
@@ -378,7 +374,7 @@ Output Ready!
 **Cause**: FFmpeg not installed or not in PATH. Run `ffmpeg -version` to check, install if missing (macOS: `brew install ffmpeg`).
 
 ### Memory issues
-**Cause**: Very long video. Try `--max-duration 10` for shorter splits, or `--skip-titles` to process in stages.
+**Cause**: Very long video. Try `--max-duration 10` for shorter splits, or process without `--add-titles` to reduce memory usage.
 
 ### Speaker identification not working
 

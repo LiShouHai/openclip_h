@@ -53,7 +53,7 @@ For local files with existing subtitles, place the `.srt` file in the same direc
 | `--skip-analysis` | Skip analysis, use existing analysis file for clip generation |
 | `--use-background` | Include background info (streamer names/nicknames) in analysis prompts |
 | `--skip-clips` | Skip clip generation |
-| `--skip-titles` | Skip adding artistic titles to clips |
+| `--add-titles` | Add artistic titles to clips (disabled by default) |
 | `--skip-cover` | Skip cover image generation |
 | `-v`, `--verbose` | Enable verbose logging |
 | `--debug` | Export full prompts sent to LLM (saved to `debug_prompts/`) |
@@ -83,7 +83,7 @@ The orchestrator runs this pipeline automatically:
 6. **Add artistic titles** to clips using `--title-style`
 7. **Generate cover images** for each highlight
 
-Use `--skip-clips`, `--skip-titles`, `--skip-cover` to skip specific steps. Use `--skip-download` and `--skip-analysis` to resume from intermediate results.
+Use `--skip-clips`, `--skip-cover` to skip specific steps. Use `--add-titles` to enable artistic titles. Use `--skip-download` and `--skip-analysis` to resume from intermediate results.
 
 ## Output Structure
 

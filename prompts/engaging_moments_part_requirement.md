@@ -53,18 +53,21 @@ In addition to the general criteria above, apply these type-specific nuances bas
 - Identify actionable tips or valuable explanations
 - Look for concepts that simplify complex topics
 - Prioritize educational value and practical applications
+- Standalone: the clip should be understandable without watching the rest of the video; include enough context (e.g. the question or setup that prompted the point) in the time range
 
 ### For SPEECH:
 - Find emotional peaks and inspirational moments
 - Capture memorable quotes and powerful statements
 - Identify audience engagement (applause, etc.)
 - Look for storytelling climax and narrative resolution
+- Standalone: the clip should be understandable without watching the rest of the video
 
 ### For OPINION:
 - Prioritize strong, controversial, or surprising viewpoints
 - Look for debates or disagreements
 - Find relatable or thought-provoking statements
 - Identify unique perspectives that challenge common beliefs
+- Standalone: the clip should be understandable without watching the rest of the video; include the question or context that triggered the opinion if present in the transcript
 
 ### For EXPERIENCE:
 - Seek personal stories with emotional depth
@@ -77,6 +80,7 @@ In addition to the general criteria above, apply these type-specific nuances bas
 - Identify actionable strategies and methodologies
 - Look for unique market perspectives and predictions
 - Prioritize high-value professional content
+- Standalone: the clip should be understandable without watching the rest of the video; include enough context so the advice or insight makes sense on its own
 
 ### For CONTENT_REVIEW:
 - Capture unique or surprising opinions

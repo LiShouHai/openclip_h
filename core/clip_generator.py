@@ -324,7 +324,9 @@ class ClipGenerator:
                 '-t', str(duration),
                 '-c:v', 'libx264',
                 '-c:a', 'aac',
-                '-avoid_negative_ts', 'make_zero',
+                '-vf', 'setpts=PTS-STARTPTS',
+                '-af', 'asetpts=PTS-STARTPTS',
+                '-movflags', '+faststart',
                 '-y',
                 output_path
             ]

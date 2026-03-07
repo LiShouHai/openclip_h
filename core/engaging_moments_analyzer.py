@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class EngagingMomentsAnalyzer:
     """Analyzes video transcripts to identify engaging moments using LLM APIs"""
     
-    def __init__(self, api_key: Optional[str] = None, provider: str = "qwen", use_background: bool = False, language: str = "zh", debug: bool = False, custom_prompt_file: Optional[str] = None, max_clips: int = MAX_CLIPS):
+    def __init__(self, api_key: Optional[str] = None, provider: str = "qwen", use_background: bool = False, language: str = "zh", debug: bool = False, custom_prompt_file: Optional[str] = None, max_clips: int = MAX_CLIPS, user_intent: Optional[str] = None):
         """
         Initialize the analyzer
 
@@ -31,9 +31,11 @@ class EngagingMomentsAnalyzer:
             language: Language for output ("zh" for Chinese, "en" for English)
             debug: Enable debug mode to export full prompts sent to LLM
             custom_prompt_file: Path to custom prompt file (optional)
+            user_intent: Optional free-text description of what the user is looking for
         """
         self.custom_prompt_file = custom_prompt_file
         self.max_clips = max_clips
+        self.user_intent = user_intent.strip() if user_intent else None
         self.provider = provider.lower()
         self.prompts_dir = Path(__file__).parent.parent / "prompts"
         self.use_background = use_background
@@ -266,6 +268,8 @@ class EngagingMomentsAnalyzer:
             prompt_parts.append("\n\n")
 
         prompt_parts.append(prompt_template)
+        if self.user_intent:
+            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
         prompt_parts.append(f"\n\n## Transcript Data for {part_name}\n\n")
         prompt_parts.append(transcript_context)
         prompt_parts.append("\n\nPlease analyze this transcript and identify engaging moments following the requirements above.")
@@ -303,6 +307,8 @@ class EngagingMomentsAnalyzer:
             prompt_parts.append("\n\n")
 
         prompt_parts.append(prompt_template.replace("{max_clips}", str(self.max_clips)))
+        if self.user_intent:
+            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking the final clips.")
         prompt_parts.append(f"\n\n## All Engaging Moments Data\n\n")
         prompt_parts.append(moments_context)
         prompt_parts.append(f"\n\nPlease select and rank the top {self.max_clips} most engaging moments following the requirements above.")

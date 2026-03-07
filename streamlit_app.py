@@ -49,6 +49,12 @@ TRANSLATIONS = {
         'language': 'Output Language',
         'output_dir': 'Output Directory',
         'use_background': 'Use Background Info',
+        'user_intent': 'What are you looking for? (optional)',
+        'user_intent_help': 'Describe what you want to find, e.g. "Sam\'s predictions about AI timelines" or "funny moments". Leave blank to find the most engaging clips overall.',
+        'user_intent_placeholder': 'e.g. Sam\'s predictions about AI timelines',
+        'advanced_options': 'Advanced Options',
+        'override_analysis_prompt': 'Override Analysis Prompt',
+        'override_analysis_prompt_help': 'Replace the default analysis prompt entirely. For developers who want full control over how the LLM analyzes content.',
         'use_custom_prompt': 'Use Custom Highlight Analysis Prompt',
         'force_whisper': 'Force Whisper to Generate Subtitles',
         'generate_clips': 'Generate Clips',
@@ -129,6 +135,12 @@ TRANSLATIONS = {
         'language': '输出语言',
         'output_dir': '输出目录',
         'use_background': '使用背景信息提示词',
+        'user_intent': '你想找什么？（可选）',
+        'user_intent_help': '描述你想找的内容，例如"Sam对AI时间线的预测"或"搞笑时刻"。留空则自动找最精彩的片段。',
+        'user_intent_placeholder': '例如：Sam对AI时间线的预测',
+        'advanced_options': '高级选项',
+        'override_analysis_prompt': '覆盖分析提示词',
+        'override_analysis_prompt_help': '完全替换默认分析提示词。适合想完全控制LLM分析方式的开发者。',
         'use_custom_prompt': '使用自定义高光分析提示词',
         'force_whisper': '强制使用Whisper生成字幕',
         'generate_clips': '生成高光片段',
@@ -222,6 +234,8 @@ DEFAULT_DATA = {
     'custom_prompt_file': None,
     'custom_prompt_text': "",
     'speaker_references_dir': "",
+    'mode': 'engaging_moments',
+    'user_intent': "",
     # Language setting
     'ui_language': "zh",
     # Processing result
@@ -573,6 +587,16 @@ with st.sidebar:
     )
     data['max_clips'] = max_clips
 
+    # User intent
+    user_intent = st.text_input(
+        t['user_intent'],
+        value=data.get('user_intent', ''),
+        placeholder=t['user_intent_placeholder'],
+        help=t['user_intent_help'],
+        key=f"user_intent_{st.session_state.reset_counter}"
+    )
+    data['user_intent'] = user_intent
+
     # Output directory
     output_dir = st.text_input(
         t['output_dir'],
@@ -652,28 +676,28 @@ with st.sidebar:
         # st.subheader("📝 Background Information")
         st.info(t['background_info_notice'])
     
-    # Custom prompt file option
-    use_custom_prompt = st.checkbox(
-        t['use_custom_prompt'],
-        value=data.get('use_custom_prompt', False),
-        help=t['use_custom_prompt_help'],
-        key=f"use_custom_prompt_{st.session_state.reset_counter}"
-    )
-    data['use_custom_prompt'] = use_custom_prompt
-    
-    # Initialize custom_prompt_text if not present
-    if 'custom_prompt_text' not in data:
-        data['custom_prompt_text'] = ""
+    with st.expander(t['advanced_options']):
+        force_whisper = st.checkbox(
+            t['force_whisper'],
+            value=data['force_whisper'],
+            help=t['force_whisper_help'],
+            key=f"force_whisper_{st.session_state.reset_counter}"
+        )
+        data['force_whisper'] = force_whisper
 
-    force_whisper = st.checkbox(
-        t['force_whisper'],
-        value=data['force_whisper'],
-        help=t['force_whisper_help'],
-        key=f"force_whisper_{st.session_state.reset_counter}"
-    )
-    data['force_whisper'] = force_whisper
+        use_custom_prompt = st.checkbox(
+            t['override_analysis_prompt'],
+            value=data.get('use_custom_prompt', False),
+            help=t['override_analysis_prompt_help'],
+            key=f"use_custom_prompt_{st.session_state.reset_counter}"
+        )
+        data['use_custom_prompt'] = use_custom_prompt
 
-    st.caption(t['advanced_config_notice'])
+        # Initialize custom_prompt_text if not present
+        if 'custom_prompt_text' not in data:
+            data['custom_prompt_text'] = ""
+
+        st.caption(t['advanced_config_notice'])
 
     # Save data to file
     save_to_file(data)
@@ -954,6 +978,8 @@ def process_video_worker(job, progress_callback):
         speaker_references_dir=options.get('speaker_references_dir'),
         burn_subtitles=options.get('burn_subtitles', False),
         subtitle_translation=options.get('subtitle_translation') or None,
+        mode=options.get('mode', 'engaging_moments'),
+        user_intent=options.get('user_intent') or None,
     )
     
     result = asyncio.run(orchestrator.process_video(
@@ -1006,6 +1032,7 @@ if process_clicked:
             'speaker_references_dir': speaker_references_dir or None,
             'burn_subtitles': burn_subtitles,
             'subtitle_translation': subtitle_translation or None,
+            'user_intent': user_intent or None,
         }
         
         # Create and start job

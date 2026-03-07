@@ -235,54 +235,43 @@ class CoverImageGenerator:
             return ImageFont.load_default()
     
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.Draw) -> list:
-        """Wrap text to fit within max_width (handles Chinese text without spaces)"""
+        """Wrap text to fit within max_width (handles Chinese, English, and mixed text)"""
         lines = []
-        
-        # Check if text has spaces (English) or not (Chinese)
-        has_spaces = ' ' in text
-        
-        if has_spaces:
-            # English text - split by words
-            words = text.split()
-            current_line = []
-            
-            for word in words:
-                test_line = ' '.join(current_line + [word])
-                bbox = draw.textbbox((0, 0), test_line, font=font)
-                test_width = bbox[2] - bbox[0]
-                
-                if test_width <= max_width:
-                    current_line.append(word)
-                else:
-                    if current_line:
-                        lines.append(' '.join(current_line))
-                        current_line = [word]
+        current_line = ""
+
+        for char in text:
+            test_line = current_line + char
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            test_width = bbox[2] - bbox[0]
+
+            if test_width <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    # Prefer breaking at the last space, but only if the segment before
+                    # the space is wide enough (≥30% of max_width) — avoids stranding
+                    # short prefixes like "AI" alone on a line in mixed text
+                    last_space = current_line.rfind(' ')
+                    if last_space > 0:
+                        segment = current_line[:last_space]
+                        seg_bbox = draw.textbbox((0, 0), segment, font=font)
+                        seg_width = seg_bbox[2] - seg_bbox[0]
+                        if seg_width >= max_width * 0.3:
+                            lines.append(segment)
+                            current_line = current_line[last_space + 1:] + char
+                        else:
+                            lines.append(current_line)
+                            current_line = char
                     else:
-                        lines.append(word)
-            
-            if current_line:
-                lines.append(' '.join(current_line))
-        else:
-            # Chinese text - split by characters
-            current_line = ""
-            
-            for char in text:
-                test_line = current_line + char
-                bbox = draw.textbbox((0, 0), test_line, font=font)
-                test_width = bbox[2] - bbox[0]
-                
-                if test_width <= max_width:
-                    current_line += char
-                else:
-                    if current_line:
                         lines.append(current_line)
                         current_line = char
-                    else:
-                        lines.append(char)
-            
-            if current_line:
-                lines.append(current_line)
-        
+                else:
+                    lines.append(char)
+                    current_line = ""
+
+        if current_line:
+            lines.append(current_line)
+
         return lines if lines else [text]
     
     def _draw_outlined_text(self, draw: ImageDraw.Draw, text: str, font: ImageFont.FreeTypeFont,

@@ -72,7 +72,8 @@ class VideoOrchestrator:
                 speaker_references_dir: Optional[str] = None,
                 mode: str = "engaging_moments",
                 burn_subtitles: bool = False,
-                subtitle_translation: str = None):
+                subtitle_translation: str = None,
+                user_intent: Optional[str] = None):
         """
         Initialize the video orchestrator
 
@@ -150,6 +151,7 @@ class VideoOrchestrator:
                         debug=self.debug,
                         custom_prompt_file=custom_prompt_file,
                         max_clips=max_clips,
+                        user_intent=user_intent,
                     )
                 logger.info(f"🧠 Engaging moments analysis: enabled (provider: {self.llm_provider}, language: {language}, mode: {mode}, background: {'yes' if use_background else 'no'})")
             except ValueError as e:

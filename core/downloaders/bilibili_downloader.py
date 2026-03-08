@@ -572,14 +572,12 @@ class ImprovedBilibiliDownloader:
 
                 state['max_progress'] = max(state['max_progress'], progress)
                 
-                # Clean up speed and ETA strings to remove Unicode characters
-                speed = d.get('_speed_str', '').strip()
-                eta = d.get('_eta_str', '').strip()
-                
-                # Remove common Unicode characters that don't render well in Streamlit
-                # Keep only ASCII printable characters
-                speed = ''.join(c for c in speed if ord(c) < 128)
-                eta = ''.join(c for c in eta if ord(c) < 128)
+                # Strip ANSI escape codes (e.g. \x1b[0;32m) then keep only ASCII printable chars
+                _ansi_re = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+                speed = _ansi_re.sub('', d.get('_speed_str', '')).strip()
+                eta = _ansi_re.sub('', d.get('_eta_str', '')).strip()
+                speed = ''.join(c for c in speed if 32 <= ord(c) < 127)
+                eta = ''.join(c for c in eta if 32 <= ord(c) < 127)
                 
                 status = f"Downloading: {speed} ETA: {eta}".strip()
                 progress_callback(status, state['max_progress'])

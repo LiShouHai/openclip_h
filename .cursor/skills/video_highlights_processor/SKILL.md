@@ -19,6 +19,15 @@ Where `<source>` is a video URL (Bilibili/YouTube) or local file path (MP4, WebM
 
 For local files with existing subtitles, place the `.srt` file in the same directory with the same filename (e.g. `video.mp4` → `video.srt`).
 
+## Preflight Checklist
+
+- Run from repository root so relative paths (for example `references/`) resolve correctly
+- Set one API key:
+  - `QWEN_API_KEY` (default provider: qwen), or
+  - `OPENROUTER_API_KEY` (if `--llm-provider openrouter`)
+- If using `--speaker-references`: run `uv sync --extra speakers` and set `HUGGINGFACE_TOKEN`
+- If using `--burn-subtitles`: ensure `ffmpeg` is installed with `libass`
+
 ## CLI Reference
 
 ### Required
@@ -32,7 +41,6 @@ For local files with existing subtitles, place the `.srt` file in the same direc
 | Flag | Default | Description |
 |---|---|---|
 | `-o`, `--output <dir>` | `processed_videos` | Output directory |
-| `--max-duration <minutes>` | `20.0` | Max duration before auto-splitting |
 | `--max-clips <n>` | `5` | Maximum number of highlight clips |
 | `--browser <browser>` | `firefox` | Browser for cookies: `chrome`, `firefox`, `edge`, `safari` |
 | `--title-style <style>` | `fire_flame` | Title style: `gradient_3d`, `neon_glow`, `metallic_gold`, `rainbow_3d`, `crystal_ice`, `fire_flame`, `metallic_silver`, `glowing_plasma`, `stone_carved`, `glass_transparent` |
@@ -81,7 +89,7 @@ Set the appropriate API key for the chosen `--llm-provider`:
 The orchestrator runs this pipeline automatically:
 
 1. **Download** video and platform subtitles (Bilibili/YouTube) or accept local file
-2. **Split** videos longer than `--max-duration` into segments
+2. **Split** videos longer than the built-in duration threshold into segments
 3. **Transcribe** using platform subtitles or Whisper AI (fallback or `--force-whisper`)
 4. **Analyze** transcript for engaging moments via LLM
 5. **Generate clips** from identified moments
@@ -96,9 +104,8 @@ Use `--skip-clips`, `--skip-cover` to skip specific steps. Use `--add-titles` to
 processed_videos/{video_name}/
 ├── downloads/              # Original video, subtitles, and metadata
 ├── splits/                 # Split parts and AI analysis results
-├── clips/                  # Generated highlight clips and summary
-├── clips_with_titles/      # Final clips with artistic titles and cover images
-└── clips_post_processed/   # Subtitle-burned clips (only when --burn-subtitles used)
+├── clips/                  # Generated highlight clips + generated cover images
+└── clips_post_processed/   # Post-processed clips when using --add-titles and/or --burn-subtitles
 ```
 
 ## Option Selection Guide
@@ -108,8 +115,6 @@ processed_videos/{video_name}/
 **`--force-whisper`** — Use when platform subtitles are auto-generated (often inaccurate), when "no engaging moments found" occurs (better transcripts improve analysis), or for non-native language content where platform captions are unreliable.
 
 **`--use-background`** — Use for content featuring recurring personalities (streamers, hosts) where nicknames and community references matter. Reads from `prompts/background/background.md`.
-
-**`--max-duration`** — Default 20 min works for most videos. Decrease to 10-15 for very long livestreams (2+ hours) to keep segments manageable. Increase to 30-40 for shorter content to avoid unnecessary splits. Splitting happens at subtitle boundaries to preserve coherence.
 
 **Multi-part analysis** — Videos that get split are analyzed per-segment, then aggregated to the top 5 engaging moments across all segments.
 
@@ -125,7 +130,6 @@ processed_videos/{video_name}/
 |---|---|
 | "No API key provided" | Set `QWEN_API_KEY` or `OPENROUTER_API_KEY` env var |
 | "Video download failed" | Check network/URL; try different `--browser`; or use local file |
-| "Transcript generation failed" | Try larger `--whisper-model` or check audio quality |
+| "Transcript generation failed" | Try `--force-whisper` or check audio quality |
 | "No engaging moments found" | Try `--force-whisper` for better transcript accuracy |
 | "Clip generation failed" | Ensure analysis completed; check for existing analysis file |
-

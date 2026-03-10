@@ -340,14 +340,12 @@ After processing, the output directory is structured as follows:
 processed_videos/{video_name}/
 ├── downloads/                # Original video, subtitles, and metadata
 ├── splits/                   # Split parts and AI analysis results
-├── clips/                    # Generated highlight clips, subtitles, and summary
+├── clips/                    # Generated highlight clips, subtitles, summary, and cover images
 │   ├── rank_01_xxx.mp4
 │   ├── rank_01_xxx.srt
-│   └── engaging_moments_summary.md
-├── clips_with_titles/        # Clips with artistic titles and cover images (--add-titles)
-│   ├── rank_01_xxx.mp4
+│   ├── engaging_moments_summary.md
 │   └── cover_rank_01_xxx.jpg
-└── clips_post_processed/     # Subtitle-burned clips (--burn-subtitles)
+└── clips_post_processed/     # Post-processed clips (--add-titles and/or --burn-subtitles)
     ├── rank_01_xxx.mp4
     └── ...
 ```

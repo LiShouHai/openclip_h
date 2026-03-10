@@ -1057,11 +1057,11 @@ Examples:
   # With custom title style
   python video_orchestrator.py --title-style neon_glow "https://www.bilibili.com/video/BV1wT6GBBEPp"
   
-  # Skip clip generation but add titles
+  # Skip clip generation
   python video_orchestrator.py --skip-clips "https://www.bilibili.com/video/BV1234567890"
   
-  # Analysis only, no clips or titles
-  python video_orchestrator.py --skip-clips --no-titles "https://www.bilibili.com/video/BV1234567890"
+  # Analysis only (skip clips and cover generation)
+  python video_orchestrator.py --skip-clips --skip-cover "https://www.bilibili.com/video/BV1234567890"
   
   # Skip analysis but generate clips from existing analysis file
   python video_orchestrator.py --skip-download --skip-analysis "https://www.bilibili.com/video/BV1wT6GBBEPp"

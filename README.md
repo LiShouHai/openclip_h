@@ -317,7 +317,7 @@ uv run python video_orchestrator.py \
 
 **仅分析，不生成剪辑：**
 ```bash
-uv run python video_orchestrator.py --skip-clips --no-titles "VIDEO_URL"
+uv run python video_orchestrator.py --skip-clips --skip-cover "VIDEO_URL"
 ```
 
 **说话人识别（预览版）：**
@@ -340,14 +340,12 @@ uv run python video_orchestrator.py --skip-download --title-style crystal_ice "V
 processed_videos/{video_name}/
 ├── downloads/                # 原始视频、字幕和元数据
 ├── splits/                   # 分割片段和 AI 分析结果
-├── clips/                    # 生成的精彩剪辑、字幕和摘要
+├── clips/                    # 生成的精彩剪辑、字幕、摘要和封面图
 │   ├── rank_01_xxx.mp4
 │   ├── rank_01_xxx.srt
-│   └── engaging_moments_summary.md
-├── clips_with_titles/        # 带艺术标题的最终剪辑和封面图片（--add-titles）
-│   ├── rank_01_xxx.mp4
+│   ├── engaging_moments_summary.md
 │   └── cover_rank_01_xxx.jpg
-└── clips_post_processed/     # 烧录字幕后的剪辑（--burn-subtitles）
+└── clips_post_processed/     # 后处理剪辑（--add-titles 和/或 --burn-subtitles）
     ├── rank_01_xxx.mp4
     └── ...
 ```

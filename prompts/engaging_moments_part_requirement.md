@@ -133,7 +133,7 @@ In addition to the general criteria above, apply these type-specific nuances bas
 - Create attractive and engaging titles (no emojis, punctuation allowed)
 - Titles should avoid sensitive, negative, hate, or offensive words
 - Co-hosting segments and interactive moments are usually most engaging
-- Include relevant transcript excerpts that match the time range exactly
+- Include a brief summary describing what happens in the moment
 - Provide clear explanations for why each moment is engaging
 
 ### Engagement Analysis
@@ -151,7 +151,7 @@ In addition to the general criteria above, apply these type-specific nuances bas
 6. **Check duration** - Confirm each moment is 30-240 seconds long
 7. **Avoid overlaps** - Ensure moments don't overlap in time
 8. **Quality over quantity** - Only include genuinely engaging moments
-9. **Extract transcripts** - Copy the exact text from the transcript for each moment
+9. **Write a summary** - Write a brief 1-2 sentence description of what happens in each moment
 10. **Write compelling titles** - Follow the language-specific title guidelines
 
 **If no moments meet the criteria**: Return an empty array rather than forcing low-quality selections.
@@ -169,7 +169,7 @@ Return your response as a JSON object following this exact structure:
       "start_time": "HH:MM:SS",
       "end_time": "HH:MM:SS",
       "duration_seconds": 75,
-      "transcript": "Actual transcript excerpt from the provided transcript that corresponds to this time range...",
+      "summary": "Brief description of what happens in this moment in 1-2 sentences.",
       "engagement_details": {
         "engagement_level": "high"
       },
@@ -181,7 +181,7 @@ Return your response as a JSON object following this exact structure:
       "start_time": "HH:MM:SS",
       "end_time": "HH:MM:SS",
       "duration_seconds": 60,
-      "transcript": "Another actual transcript excerpt from the provided transcript...",
+      "summary": "Brief description of what happens in this second moment in 1-2 sentences.",
       "engagement_details": {
         "engagement_level": "medium"
       },
@@ -197,9 +197,8 @@ Return your response as a JSON object following this exact structure:
 **CRITICAL TIMESTAMP RULES:**
 1. **start_time** and **end_time** MUST correspond to actual timestamps in the provided transcript
 2. DO NOT use placeholder timestamps like "HH:MM:SS" or example timestamps like "00:01:30"
-3. The **transcript** field must contain the exact text from the provided transcript between start_time and end_time
-4. Verify every timestamp exists in the transcript before including it
-5. If you cannot find valid timestamps, return an empty array
+3. Verify every timestamp exists in the transcript before including it
+4. If you cannot find valid timestamps, return an empty array
 
 **IMPORTANT QUALITY GUIDELINES:**
 1. You can identify MULTIPLE engaging moments if they exist (as shown in the example with 2 moments)
@@ -220,7 +219,7 @@ Return your response as a JSON object following this exact structure:
 - **start_time**: Simple time format (HH:MM:SS or MM:SS) - NOT SRT format with milliseconds
 - **end_time**: Simple time format (HH:MM:SS or MM:SS) - NOT SRT format with milliseconds
 - **duration_seconds**: Integer duration in seconds (must be 30-240)
-- **transcript**: Exact transcript excerpt from the provided transcript matching the time range
+- **summary**: Brief 1-2 sentence description of what happens in this moment (content description, not engagement reasoning)
 - **engagement_details**: Object with "engagement_level" ("high", "medium", or "low")
 - **why_engaging**: Detailed explanation of what makes this moment compelling
 - **tags**: Array of relevant tags from the approved list

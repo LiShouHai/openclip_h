@@ -14,7 +14,7 @@ LLM_CONFIG: Dict[str, Dict[str, Any]] = {
         "legacy_base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
         "default_model": "qwen3.5-flash",
         "default_params": {
-            "max_tokens": 8192,
+            "max_tokens": 16384,
             "temperature": 0.7,
             "top_p": 0.8,
             "stream": False
@@ -26,7 +26,7 @@ LLM_CONFIG: Dict[str, Dict[str, Any]] = {
         "base_url": "https://openrouter.ai/api/v1/chat/completions",
         "default_model": "stepfun/step-3.5-flash:free",
         "default_params": {
-            "max_tokens": 8192,
+            "max_tokens": 32768,
             "temperature": 0.7,
             "top_p": 0.8,
             "stream": False

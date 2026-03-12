@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Engaging Moments Analyzer
-Identifies engaging moments from video transcripts using Qwen API
+Identifies engaging moments from video transcripts using LLM APIs
 """
 
 import json
@@ -357,7 +357,7 @@ class EngagingMomentsAnalyzer:
                 result = self._create_empty_result(part_name)
                 
         except Exception as e:
-            logger.error(f"Error calling Qwen API: {e}")
+            logger.error(f"Error calling LLM API ({self.provider}): {e}")
             result = self._create_empty_result(part_name)
         
         return result
@@ -429,7 +429,7 @@ The response should follow this structure:
       "start_time": "00:01:30",
       "end_time": "00:02:45",
       "duration_seconds": 75,
-      "transcript": "Relevant transcript content for this moment...",
+      "summary": "Brief 1-2 sentence description of what happens in this moment.",
       "engagement_details": {{
         "engagement_level": "high"
       }},
@@ -554,8 +554,8 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             moment['duration_seconds'] = int(duration)
             
             # Ensure other fields exist
-            if 'transcript' not in moment:
-                moment['transcript'] = ""
+            if 'summary' not in moment:
+                moment['summary'] = ""
             if 'engagement_details' not in moment:
                 moment['engagement_details'] = {"engagement_level": "medium"}
             elif 'engagement_level' not in moment['engagement_details']:
@@ -705,7 +705,7 @@ The response should follow this structure:
         "end_time": "00:17:15",
         "duration": 105
       }},
-      "transcript": "Relevant transcript content...",
+      "summary": "Brief 1-2 sentence description of what happens in this moment.",
       "engagement_details": {{
         "engagement_level": "high"
       }},
@@ -863,7 +863,7 @@ Moment {i}:
 - Duration: {moment.get('duration_seconds', 0)} seconds
 - Engagement Level: {engagement_level}
 - Tags: {', '.join(moment.get('tags', []))}
-- Transcript: {moment.get('transcript', '')[:200]}...
+- Summary: {moment.get('summary', '')}
 """)
         
         return '\n'.join(context_lines)

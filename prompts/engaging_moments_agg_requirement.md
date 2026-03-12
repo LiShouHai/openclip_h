@@ -95,7 +95,7 @@ Return your response as a JSON object following this exact structure:
         "end_time": "00:17:15",
         "duration": 105
       },
-      "transcript": "Relevant transcript content...",
+      "summary": "Brief description of what happens in this moment in 1-2 sentences.",
       "engagement_details": {
         "engagement_level": "high"
       },
@@ -111,7 +111,7 @@ Return your response as a JSON object following this exact structure:
         "end_time": "00:06:10",
         "duration": 50
       },
-      "transcript": "Another relevant transcript excerpt...",
+      "summary": "Brief description of what happens in this second moment in 1-2 sentences.",
       "engagement_details": {
         "engagement_level": "medium"
       },
@@ -162,7 +162,7 @@ Return your response as a JSON object following this exact structure:
   - **start_time**: Time in MM:SS or HH:MM:SS format (no milliseconds)
   - **end_time**: Time in MM:SS or HH:MM:SS format (no milliseconds)
   - **duration**: Integer duration in seconds
-- **transcript**: Original transcript excerpt
+- **summary**: Brief 1-2 sentence description of what happens in this moment
 - **engagement_details**: Object with "engagement_level" ("high", "medium", "low")
 - **why_engaging**: Detailed explanation of appeal
 - **tags**: Array of relevant engagement tags

@@ -161,6 +161,37 @@ class VideoFileValidator:
     
     # Supported subtitle extensions
     SUBTITLE_EXTENSIONS = ['.srt', '.vtt', '.ass']
+
+    # Invisible Unicode format/control characters commonly introduced when
+    # copying Windows paths from rich text apps or terminals.
+    _INVISIBLE_PATH_CHARS = {
+        '\u200b',  # zero width space
+        '\u200e',  # left-to-right mark
+        '\u200f',  # right-to-left mark
+        '\u202a',  # left-to-right embedding
+        '\u202b',  # right-to-left embedding
+        '\u202c',  # pop directional formatting
+        '\u202d',  # left-to-right override
+        '\u202e',  # right-to-left override
+        '\u2066',  # left-to-right isolate
+        '\u2067',  # right-to-left isolate
+        '\u2068',  # first strong isolate
+        '\u2069',  # pop directional isolate
+        '\ufeff',  # zero width no-break space / BOM
+    }
+
+    @classmethod
+    def sanitize_path_input(cls, source: str) -> str:
+        """Remove invisible formatting chars and trim outer whitespace/quotes."""
+        if not source:
+            return source
+
+        cleaned = ''.join(ch for ch in source if ch not in cls._INVISIBLE_PATH_CHARS).strip()
+
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+            cleaned = cleaned[1:-1].strip()
+
+        return cleaned
     
     @classmethod
     def resolve_local_path(cls, source: str) -> str:
@@ -177,6 +208,7 @@ class VideoFileValidator:
         Returns the resolved path string if a match is found, otherwise the
         original source string (which will fail existence checks as before).
         """
+        source = cls.sanitize_path_input(source)
         path = Path(source)
         if path.exists():
             return source
@@ -214,6 +246,8 @@ class VideoFileValidator:
     @classmethod
     def is_local_video_file(cls, source: str) -> bool:
         """Check if source is a local video file or URL"""
+        source = cls.sanitize_path_input(source)
+
         # Check if it's a URL
         if source.startswith(('http://', 'https://', 'ftp://')):
             return False

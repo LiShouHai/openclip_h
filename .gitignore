@@ -65,6 +65,10 @@ all_artistic_styles_showcase/
 *.tmp
 *.log
 demo/demo_skill.mov
+
+# Runtime data
+jobs/
+
 # Local development config
 AGENTS.md
 CLAUDE.md

@@ -19,6 +19,7 @@
 
 - **2026-03-30**:
   - 新增默认开启的剪辑边界修正，目标是让高光片段的开始和结束更自然，减少突兀截断
+  - 在 Streamlit UI 中支持 Bilibili 多 P 视频一键创建任务、后台任务重试，以及重启后取消 pending 任务，感谢 [@xenoamess](https://github.com/xenoamess)
 - **2026-03-25**:
   - 新增 [Cookie 使用建议](#cookie-guidance) 与更清晰的 Streamlit `Cookie 模式`；远程视频下载可按 `不使用 cookies` → `浏览器 cookies` → `Cookies 文件` 的顺序尝试
 - **2026-03-24**:

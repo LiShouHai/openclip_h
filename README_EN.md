@@ -19,6 +19,7 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 - **2026-03-30**:
   - Added default-on clip boundary refinement to make highlight clip starts and ends feel more natural and reduce abrupt cuts
+  - Added Streamlit UI support for one-click job creation for multi-part Bilibili videos, background job retry, and cancelling pending jobs after restart, thanks to [@xenoamess](https://github.com/xenoamess)
 - **2026-03-25**:
   - Added [Cookie Guidance](#cookie-guidance) and a clearer Streamlit `Cookie Mode`; for remote videos, try `No cookies` → `Browser cookies` → `Cookies file` in that order
 - **2026-03-24**:

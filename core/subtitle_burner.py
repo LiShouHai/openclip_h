@@ -25,7 +25,10 @@ import os
 import re
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+
+from PIL import Image, ImageDraw
 
 from core.config import API_KEY_ENV_VARS
 
@@ -37,31 +40,139 @@ logger = logging.getLogger(__name__)
 _SPEAKER_TAG_RE = re.compile(r"^\[.*?\]\s*(?:>>\s*)?", re.UNICODE)
 
 
-# ASS subtitle header — two styles:
-#   Original:    bottom center (Alignment=2), 50px margin from bottom  — white, 80px font
-#   Translation: bottom center (Alignment=2), 150px margin from bottom — yellow, 80px font
-ASS_HEADER = """\
-[Script Info]
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-ScaledBorderAndShadow: yes
+ASS_PLAY_RES_X = 1920
+ASS_PLAY_RES_Y = 1080
+ASS_ALIGNMENT_BOTTOM_CENTER = 2
 
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Original,Arial,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,50,1
-Style: Translation,Arial,80,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,150,1
+SUBTITLE_FONT_SIZE_PRESETS = {
+    "small": 64,
+    "medium": 80,
+    "large": 96,
+}
 
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
+SUBTITLE_VERTICAL_POSITION_PRESETS = {
+    "bottom": 150,
+    "lower_middle": 260,
+    "middle": 390,
+}
+
+SUBTITLE_BILINGUAL_LAYOUT_OPTIONS = {"auto", "original_only", "bilingual"}
+SUBTITLE_BACKGROUND_STYLE_OPTIONS = {"none", "light_box", "solid_box"}
+
+
+@dataclass(frozen=True)
+class SubtitleStylePreset:
+    original_color: str
+    translation_color: str
+    outline_color: str
+    shadow_color: str
+    outline: int
+    shadow: int
+    bold: int = -1
+    font_name: str = "Arial"
+
+
+SUBTITLE_STYLE_PRESETS = {
+    "default": SubtitleStylePreset(
+        original_color="&H00FFFFFF",
+        translation_color="&H0000FFFF",
+        outline_color="&H00000000",
+        shadow_color="&H80000000",
+        outline=2,
+        shadow=1,
+    ),
+    "clean": SubtitleStylePreset(
+        original_color="&H00F5F5F5",
+        translation_color="&H00D7F3FF",
+        outline_color="&H00313131",
+        shadow_color="&H50000000",
+        outline=1,
+        shadow=1,
+        bold=0,
+    ),
+    "high_contrast": SubtitleStylePreset(
+        original_color="&H00FFFFFF",
+        translation_color="&H0000FFFF",
+        outline_color="&H00000000",
+        shadow_color="&HC0000000",
+        outline=3,
+        shadow=2,
+    ),
+    "stream": SubtitleStylePreset(
+        original_color="&H00FFFFFF",
+        translation_color="&H0057D8FF",
+        outline_color="&H000B0B0B",
+        shadow_color="&H90000000",
+        outline=2,
+        shadow=2,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class SubtitleStyleConfig:
+    preset: str = "default"
+    font_size: str = "medium"
+    vertical_position: str = "bottom"
+    bilingual_layout: str = "auto"
+    background_style: str = "none"
+
+    def normalized(self) -> "SubtitleStyleConfig":
+        return SubtitleStyleConfig(
+            preset=self.preset if self.preset in SUBTITLE_STYLE_PRESETS else "default",
+            font_size=self.font_size if self.font_size in SUBTITLE_FONT_SIZE_PRESETS else "medium",
+            vertical_position=(
+                self.vertical_position
+                if self.vertical_position in SUBTITLE_VERTICAL_POSITION_PRESETS
+                else "bottom"
+            ),
+            bilingual_layout=(
+                self.bilingual_layout
+                if self.bilingual_layout in SUBTITLE_BILINGUAL_LAYOUT_OPTIONS
+                else "auto"
+            ),
+            background_style=(
+                self.background_style
+                if self.background_style in SUBTITLE_BACKGROUND_STYLE_OPTIONS
+                else "none"
+            ),
+        )
+
+    @classmethod
+    def from_dict(cls, payload: dict | None) -> "SubtitleStyleConfig":
+        if not payload:
+            return cls()
+        return cls(
+            preset=payload.get("preset", "default"),
+            font_size=payload.get("font_size", "medium"),
+            vertical_position=payload.get("vertical_position", "bottom"),
+            bilingual_layout=payload.get("bilingual_layout", "auto"),
+            background_style=payload.get("background_style", "none"),
+        ).normalized()
+
+    def to_dict(self) -> dict:
+        normalized = self.normalized()
+        return {
+            "preset": normalized.preset,
+            "font_size": normalized.font_size,
+            "vertical_position": normalized.vertical_position,
+            "bilingual_layout": normalized.bilingual_layout,
+            "background_style": normalized.background_style,
+        }
 
 
 class SubtitleBurner:
     """Burn SRT subtitles into video clips, with optional LLM-powered translation."""
 
-    def __init__(self, api_key: str = None, provider: str = "qwen", model: str = None):
+    def __init__(
+        self,
+        api_key: str = None,
+        provider: str = "qwen",
+        model: str = None,
+        subtitle_style_config: SubtitleStyleConfig | None = None,
+    ):
         self.model = model  # None → each client uses its config default
+        self.subtitle_style_config = (subtitle_style_config or SubtitleStyleConfig()).normalized()
         if api_key:
             provider = provider.lower()
             if provider == "openrouter":
@@ -164,6 +275,55 @@ class SubtitleBurner:
         ass_path.write_text(self._generate_ass(segments, translated), encoding="utf-8")
         return True
 
+    def generate_preview_image(
+        self,
+        output_path: Path,
+        subtitle_translation: str = None,
+        original_text: str = "This is how the original subtitle will look.",
+        translated_text: str = "这是翻译字幕的预览效果。",
+    ) -> bool:
+        """
+        Render a static subtitle style preview image using the same ASS path
+        as final subtitle burning.
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        segments = [
+            {
+                "start": "00:00:00,000",
+                "end": "00:00:06,000",
+                "text": original_text,
+            }
+        ]
+
+        translated = None
+        layout = self.subtitle_style_config.bilingual_layout
+        if layout == "bilingual":
+            translated = [
+                {
+                    "start": "00:00:00,000",
+                    "end": "00:00:06,000",
+                    "text": translated_text,
+                }
+            ]
+        elif layout == "auto" and subtitle_translation:
+            translated = [
+                {
+                    "start": "00:00:00,000",
+                    "end": "00:00:06,000",
+                    "text": translated_text,
+                }
+            ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            background_path = tmpdir_path / "preview_background.png"
+            ass_path = tmpdir_path / "preview.ass"
+            self._create_preview_background(background_path)
+            ass_path.write_text(self._generate_ass(segments, translated), encoding="utf-8")
+            return self._render_ass_preview(background_path, ass_path, output_path)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -215,41 +375,75 @@ class SubtitleBurner:
                 segments[i]["end"] = segments[i + 1]["start"]
         return segments
 
+    def _parse_numbered_translation_lines(self, text: str, expected_count: int) -> list[str] | None:
+        """
+        Parse translation output in the form:
+          1|translated text
+          2|translated text
+        Returns a list of translated strings ordered by id, or None on failure.
+        """
+        cleaned = re.sub(r"^```[a-z]*\n?", "", text.strip(), flags=re.MULTILINE)
+        cleaned = re.sub(r"^```$", "", cleaned, flags=re.MULTILINE)
+
+        translations_by_id = {}
+        for raw_line in cleaned.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            parts = line.split("|", 1)
+            if len(parts) != 2:
+                return None
+            line_id, translated_text = parts
+            if not line_id.strip().isdigit():
+                return None
+            idx = int(line_id.strip())
+            if idx < 1 or idx > expected_count:
+                return None
+            translations_by_id[idx] = translated_text.strip()
+
+        if len(translations_by_id) != expected_count:
+            return None
+
+        return [translations_by_id[i] for i in range(1, expected_count + 1)]
+
     def _translate_srt(self, segments: list, target_lang: str) -> list | None:
         """
-        Translate segments via LLM by sending/receiving SRT format directly.
+        Translate subtitle text lines via LLM while keeping SRT timing/structure local.
         Returns translated segments on success, None on failure (caller burns original-only).
         """
-        # Build SRT text to send (blank line between blocks is required SRT format)
-        srt_text = "\n\n".join(
-            f"{i}\n{seg['start']} --> {seg['end']}\n{seg['text']}"
+        numbered_lines = "\n".join(
+            f"{i}|{seg['text'].replace(chr(10), ' ').strip()}"
             for i, seg in enumerate(segments, 1)
         )
         n = len(segments)
         prompt = (
-            f"Translate the following SRT subtitle file to {target_lang}.\n"
-            f"The input contains exactly {n} numbered subtitle blocks.\n"
-            f"Your response MUST contain exactly {n} numbered subtitle blocks — no more, no less.\n"
+            f"Translate the following subtitle lines to {target_lang}.\n"
+            f"The input contains exactly {n} lines.\n"
             "Rules:\n"
-            "- Keep every line number and timestamp exactly as-is.\n"
-            "- Each input block maps to exactly one output block (do NOT merge or split blocks).\n"
-            "- Each block must have exactly one text line (the translation); do NOT add blank lines inside a block.\n"
-            "- Return ONLY the translated SRT. No extra commentary, no markdown fences.\n\n"
-            + srt_text
+            "- Keep every numeric id exactly the same.\n"
+            "- Translate only the text after the pipe character.\n"
+            "- Return exactly one output line per input line in the format id|translation.\n"
+            "- Do not merge lines, split lines, add commentary, add markdown, or return timestamps.\n"
+            "- Keep each translation on a single line.\n\n"
+            + numbered_lines
         )
         try:
             response = self.client.simple_chat(prompt, model=self.model)
-            # Strip markdown code fences the LLM may wrap the response in
-            response = re.sub(r"^```[a-z]*\n?", "", response.strip(), flags=re.MULTILINE)
-            response = re.sub(r"^```$", "", response, flags=re.MULTILINE)
-            translated = self._parse_srt_text(response)
-            if len(translated) != len(segments):
+            translated_texts = self._parse_numbered_translation_lines(response, len(segments))
+            if translated_texts is None:
                 logger.warning(
-                    f"Translation returned {len(translated)}/{len(segments)} segments; "
-                    "burning original subtitles only."
+                    "Translation returned malformed numbered lines; burning original subtitles only."
                 )
                 return None
-            return translated
+
+            return [
+                {
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "text": translated_texts[i],
+                }
+                for i, seg in enumerate(segments)
+            ]
         except Exception as e:
             logger.warning(f"Translation failed ({e}); burning original subtitles only.")
             return None
@@ -261,26 +455,174 @@ class SubtitleBurner:
         cc = int(ms) // 10
         return f"{int(h)}:{m}:{s}.{cc:02d}"
 
+    def _resolve_ass_layout(self, translated: list | None) -> tuple[dict, bool]:
+        config = self.subtitle_style_config.normalized()
+        preset = SUBTITLE_STYLE_PRESETS[config.preset]
+        font_size = SUBTITLE_FONT_SIZE_PRESETS[config.font_size]
+        translation_margin = SUBTITLE_VERTICAL_POSITION_PRESETS[config.vertical_position]
+        original_margin = max(40, translation_margin - 100)
+        has_translation = bool(translated)
+
+        if config.bilingual_layout == "bilingual":
+            show_translation = has_translation
+        elif config.bilingual_layout == "original_only":
+            show_translation = False
+        else:
+            show_translation = has_translation
+
+        if config.background_style == "none":
+            border_style = 1
+            shadow = preset.shadow
+            outline_color = preset.outline_color
+            back_color = "&H00000000"
+        elif config.background_style == "light_box":
+            border_style = 3
+            shadow = 0
+            outline_color = "&H80606060"
+            back_color = "&H80606060"
+        else:
+            border_style = 3
+            shadow = 0
+            outline_color = "&H00000000"
+            back_color = "&H00000000"
+
+        return (
+            {
+                "preset": preset,
+                "font_size": font_size,
+                "original_margin": original_margin,
+                "translation_margin": translation_margin,
+                "border_style": border_style,
+                "shadow": shadow,
+                "outline_color": outline_color,
+                "back_color": back_color,
+            },
+            show_translation,
+        )
+
+    def _build_ass_header(self, translated: list | None) -> tuple[str, bool]:
+        layout, show_translation = self._resolve_ass_layout(translated)
+        preset = layout["preset"]
+        font_size = layout["font_size"]
+        border_style = layout["border_style"]
+        shadow = layout["shadow"]
+        outline_color = layout["outline_color"]
+        back_color = layout["back_color"]
+
+        if show_translation:
+            original_color = preset.original_color
+            original_margin = layout["original_margin"]
+        else:
+            # Preserve the current single-language behavior: one subtitle line
+            # using the translation slot/color for better vertical balance.
+            original_color = preset.translation_color
+            original_margin = layout["translation_margin"]
+
+        original_style = (
+            "Style: Original,"
+            f"{preset.font_name},{font_size},{original_color},&H000000FF,"
+            f"{outline_color},{back_color},{preset.bold},0,0,0,"
+            f"100,100,0,0,{border_style},"
+            f"{preset.outline},{shadow},{ASS_ALIGNMENT_BOTTOM_CENTER},10,10,{original_margin},1"
+        )
+        translation_style = (
+            "Style: Translation,"
+            f"{preset.font_name},{font_size},{preset.translation_color},&H000000FF,"
+            f"{outline_color},{back_color},{preset.bold},0,0,0,"
+            f"100,100,0,0,{border_style},"
+            f"{preset.outline},{shadow},{ASS_ALIGNMENT_BOTTOM_CENTER},10,10,{layout['translation_margin']},1"
+        )
+
+        header = "\n".join(
+            [
+                "[Script Info]",
+                "ScriptType: v4.00+",
+                f"PlayResX: {ASS_PLAY_RES_X}",
+                f"PlayResY: {ASS_PLAY_RES_Y}",
+                "ScaledBorderAndShadow: yes",
+                "",
+                "[V4+ Styles]",
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+                original_style,
+                translation_style,
+                "",
+                "[Events]",
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+            ]
+        )
+        return header, show_translation
+
     def _generate_ass(self, segments: list, translated: list = None) -> str:
         """Build full ASS file content. Includes translation track if provided."""
-        header = ASS_HEADER
-        if not translated:
-            # No translation track: use yellow and raise to where Translation would sit
-            header = header.replace(
-                "Style: Original,Arial,80,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,50,1",
-                "Style: Original,Arial,80,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,150,1",
-            )
+        header, show_translation = self._build_ass_header(translated)
+        layout, _ = self._resolve_ass_layout(translated)
+        boxed_style = layout["border_style"] == 3
         lines = [header]
         for i, seg in enumerate(segments):
             start = self._srt_time_to_ass(seg["start"])
             end = self._srt_time_to_ass(seg["end"])
             text = _SPEAKER_TAG_RE.sub("", seg["text"].replace("\n", " "))
+            if boxed_style:
+                text = rf"\h{text}\h"
             lines.append(f"Dialogue: 0,{start},{end},Original,,0,0,0,,{text}")
-            if translated and i < len(translated):
+            if show_translation and translated and i < len(translated):
                 tr_text = _SPEAKER_TAG_RE.sub("", translated[i]["text"].replace("\n", " "))
                 if tr_text:
+                    if boxed_style:
+                        tr_text = rf"\h{tr_text}\h"
                     lines.append(f"Dialogue: 0,{start},{end},Translation,,0,0,0,,{tr_text}")
         return "\n".join(lines) + "\n"
+
+    def _create_preview_background(self, output_path: Path) -> None:
+        """Create a built-in 1920x1080 sample background for subtitle previews."""
+        img = Image.new("RGB", (ASS_PLAY_RES_X, ASS_PLAY_RES_Y), "#12161d")
+        draw = ImageDraw.Draw(img)
+
+        for y in range(ASS_PLAY_RES_Y):
+            mix = y / max(1, ASS_PLAY_RES_Y - 1)
+            r = int(18 + 20 * mix)
+            g = int(22 + 38 * mix)
+            b = int(29 + 72 * mix)
+            draw.line((0, y, ASS_PLAY_RES_X, y), fill=(r, g, b))
+
+        draw.rounded_rectangle((90, 90, 700, 410), radius=40, fill=(28, 37, 52))
+        draw.rounded_rectangle((1230, 160, 1830, 470), radius=36, fill=(55, 37, 77))
+        draw.rounded_rectangle((180, 620, 1760, 880), radius=46, fill=(24, 29, 34))
+        draw.ellipse((1450, 620, 1830, 1000), fill=(219, 116, 44))
+        draw.ellipse((120, 700, 380, 960), fill=(76, 145, 255))
+        draw.rectangle((0, 930, ASS_PLAY_RES_X, ASS_PLAY_RES_Y), fill=(10, 12, 16))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        img.save(output_path)
+
+    def _render_ass_preview(self, background: Path, ass: Path, output: Path) -> bool:
+        """Render a static preview image with ffmpeg using the generated ASS."""
+        tmp_fd, tmp_ass_str = tempfile.mkstemp(suffix=".ass")
+        os.close(tmp_fd)
+        tmp_ass = Path(tmp_ass_str)
+        try:
+            tmp_ass.write_bytes(ass.read_bytes())
+            cmd = [
+                "ffmpeg",
+                "-loop", "1",
+                "-i", str(background.resolve()),
+                "-vf", f"ass={tmp_ass.name}",
+                "-frames:v", "1",
+                "-y", str(output.resolve()),
+            ]
+            r = subprocess.run(
+                cmd,
+                cwd=str(tmp_ass.parent),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            if r.returncode != 0:
+                stderr_tail = (r.stderr or "")[-500:]
+                logger.error(f"ffmpeg preview subtitle error: {stderr_tail}")
+            return r.returncode == 0
+        finally:
+            tmp_ass.unlink(missing_ok=True)
 
     def _burn_ass(self, mp4: Path, ass: Path, output: Path) -> bool:
         """Run ffmpeg to burn the ASS subtitle file into the video."""

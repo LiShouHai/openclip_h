@@ -57,7 +57,7 @@ class QwenAPIClient:
         max_attempts = 2
         for attempt in range(1, max_attempts + 1):
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=180)
+                response = requests.post(url, headers=headers, json=payload, timeout=240)
                 response.raise_for_status()
                 return response.json()
             except requests.exceptions.Timeout as e:
@@ -66,6 +66,11 @@ class QwenAPIClient:
                     continue
                 raise Exception(f"API request failed: {e}")
             except requests.exceptions.HTTPError as e:
+                if response.status_code >= 500 and attempt < max_attempts:
+                    wait = 3 * attempt
+                    logger.warning(f"Server error ({response.status_code}), waiting {wait}s before retry {attempt}/{max_attempts}...")
+                    time.sleep(wait)
+                    continue
                 error_detail = ""
                 try:
                     error_detail = response.json()

@@ -547,14 +547,21 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
         
         try:
             # Validate timing
-            start_seconds = self.time_to_seconds(moment['start_time'])
-            end_seconds = self.time_to_seconds(moment['end_time'])
+            start_time = moment['start_time']
+            end_time = moment['end_time']
+            start_seconds = self.time_to_seconds(start_time)
+            end_seconds = self.time_to_seconds(end_time)
             duration = end_seconds - start_seconds
             
             # Check duration constraints (30 seconds to 4 minutes)
             if duration < 30 or duration > 240:
-                logger.warning(f"Invalid duration: {duration} seconds")
-                # logger.warning(f"Invalid moment: {moment}")  # for debugging
+                logger.warning(
+                    "Invalid duration: "
+                    f"title={moment.get('title', '<untitled>')!r}, "
+                    f"start_time={start_time!r} ({start_seconds:.3f}s), "
+                    f"end_time={end_time!r} ({end_seconds:.3f}s), "
+                    f"duration={duration:.3f}s"
+                )
                 return False
             
             moment['duration_seconds'] = int(duration)
@@ -570,7 +577,13 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
                 moment['tags'] = []
                 
         except Exception as e:
-            logger.warning(f"Error validating moment: {e}")
+            logger.warning(
+                "Error validating moment timing: "
+                f"title={moment.get('title', '<untitled>')!r}, "
+                f"start_time={moment.get('start_time')!r}, "
+                f"end_time={moment.get('end_time')!r}, "
+                f"error={e}"
+            )
             return False
         
         return True
@@ -941,4 +954,3 @@ Moment {i}:
         except Exception as e:
             logger.error(f"Error saving highlights to {output_path}: {e}")
             raise
-

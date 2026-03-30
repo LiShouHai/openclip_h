@@ -24,7 +24,7 @@ from core.engaging_moments_analyzer import EngagingMomentsAnalyzer
 from core.insights_analyzer import InsightsAnalyzer
 from core.clip_generator import ClipGenerator
 from core.title_adder import TitleAdder, TITLE_FONT_SIZES
-from core.subtitle_burner import SubtitleBurner
+from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 from core.cover_image_generator import CoverImageGenerator, COVER_COLORS
 
 # Import our utilities (including processing result classes)
@@ -77,6 +77,11 @@ class VideoOrchestrator:
                 mode: str = "engaging_moments",
                 burn_subtitles: bool = False,
                 subtitle_translation: str = None,
+                subtitle_style_preset: str = "default",
+                subtitle_style_font_size: str = "medium",
+                subtitle_style_vertical_position: str = "bottom",
+                subtitle_style_bilingual_layout: str = "auto",
+                subtitle_style_background_style: str = "none",
                 user_intent: Optional[str] = None,
                 normalize_boundaries: bool = True):
         """
@@ -198,6 +203,13 @@ class VideoOrchestrator:
             self.subtitle_burner = SubtitleBurner(
                 api_key=api_key if subtitle_translation else None,
                 provider=llm_provider,
+                subtitle_style_config=SubtitleStyleConfig(
+                    preset=subtitle_style_preset,
+                    font_size=subtitle_style_font_size,
+                    vertical_position=subtitle_style_vertical_position,
+                    bilingual_layout=subtitle_style_bilingual_layout,
+                    background_style=subtitle_style_background_style,
+                ),
             )
             self.subtitle_translation = subtitle_translation
             if subtitle_translation:
@@ -1233,6 +1245,11 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
         speaker_references_dir=args.speaker_references,
         burn_subtitles=args.burn_subtitles,
         subtitle_translation=args.subtitle_translation,
+        subtitle_style_preset="default",
+        subtitle_style_font_size="medium",
+        subtitle_style_vertical_position="bottom",
+        subtitle_style_bilingual_layout="auto",
+        subtitle_style_background_style="none",
         user_intent=args.user_intent,
         normalize_boundaries=args.normalize_boundaries,
     )

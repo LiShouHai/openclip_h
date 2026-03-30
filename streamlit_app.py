@@ -11,10 +11,12 @@ import json
 import re
 import time
 import threading
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from core.file_string_utils import FileStringUtils
+from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 # Import the video orchestrator
 from video_orchestrator import VideoOrchestrator
 from core.config import API_KEY_ENV_VARS, DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, LLM_CONFIG
@@ -55,6 +57,47 @@ async def get_bilibili_multi_parts(url: str, browser: Optional[str] = None, cook
     except Exception as e:
         st.warning(f"Could not detect multi-part video: {e}")
         return []
+
+
+@st.cache_data(show_spinner=False)
+def render_subtitle_style_preview(
+    preset: str,
+    font_size: str,
+    vertical_position: str,
+    background_style: str,
+    subtitle_translation: Optional[str],
+    ui_language: str,
+) -> bytes | None:
+    sample_original = (
+        "这是一行原字幕预览效果。"
+        if ui_language == "zh"
+        else "This is an original subtitle preview line."
+    )
+    sample_translation = (
+        "This is the translated subtitle preview."
+        if ui_language == "zh"
+        else "这是翻译字幕的预览效果。"
+    )
+    burner = SubtitleBurner(
+        subtitle_style_config=SubtitleStyleConfig(
+            preset=preset,
+            font_size=font_size,
+            vertical_position=vertical_position,
+            bilingual_layout="auto",
+            background_style=background_style,
+        )
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        preview_path = Path(tmpdir) / "subtitle_preview.png"
+        ok = burner.generate_preview_image(
+            preview_path,
+            subtitle_translation=subtitle_translation,
+            original_text=sample_original,
+            translated_text=sample_translation,
+        )
+        if not ok or not preview_path.exists():
+            return None
+        return preview_path.read_bytes()
 
 # Set page config
 st.set_page_config(
@@ -157,6 +200,15 @@ TRANSLATIONS = {
         'subtitle_translation': 'Subtitle Translation Language (optional)',
         'subtitle_translation_help': 'Translate subtitles to this language and burn bilingual subtitles. Select "None" for original language only.',
         'subtitle_translation_none': 'None',
+        'subtitle_style_section': 'Subtitle Style',
+        'subtitle_style_help': 'Preview and adjust burned subtitle appearance before processing.',
+        'subtitle_style_preset': 'Subtitle Style',
+        'subtitle_style_font_size': 'Subtitle Size',
+        'subtitle_style_vertical_position': 'Vertical Position',
+        'subtitle_style_background_style': 'Background Style',
+        'subtitle_preview': 'Subtitle Preview',
+        'subtitle_preview_help': 'Preview uses a built-in 1920x1080 sample background and the same ASS styling path as final burning.',
+        'subtitle_preview_failed': 'Preview could not be rendered. Please verify ffmpeg with libass is available.',
         'generate_cover_help': 'Generate cover image for the video',
         'use_background_help': 'Use background information from prompts/background/background.md',
         'use_custom_prompt_help': 'Use custom prompt for highlight analysis',
@@ -253,6 +305,15 @@ TRANSLATIONS = {
         'subtitle_translation': '字幕翻译语言（可选）',
         'subtitle_translation_help': '将字幕翻译为该语��并烧录双语字幕。选择"无"则仅烧录原语言字幕。',
         'subtitle_translation_none': '无',
+        'subtitle_style_section': '字幕样式',
+        'subtitle_style_help': '在正式处理前预览并调整烧录字幕的显示效果。',
+        'subtitle_style_preset': '字幕风格',
+        'subtitle_style_font_size': '字幕大小',
+        'subtitle_style_vertical_position': '垂直位置',
+        'subtitle_style_background_style': '背景样式',
+        'subtitle_preview': '字幕预览',
+        'subtitle_preview_help': '预览使用内置 1920x1080 示例背景，并复用最终字幕烧录的 ASS 样式路径。',
+        'subtitle_preview_failed': '字幕预览生成失败，请确认 ffmpeg 已包含 libass。',
         'generate_cover_help': '为视频生成封面图像',
         'use_background_help': '������ prompts/background/background.md 中的背景信息',
         'use_custom_prompt_help': '使用自定义提示进行高光分析',
@@ -276,6 +337,10 @@ DEFAULT_DATA = {
     'add_titles': False,
     'burn_subtitles': False,
     'subtitle_translation': None,
+    'subtitle_style_preset': 'default',
+    'subtitle_style_font_size': 'medium',
+    'subtitle_style_vertical_position': 'bottom',
+    'subtitle_style_background_style': 'none',
     'generate_cover': True,
     # Other form elements
     'input_type': "Video URL",
@@ -739,6 +804,9 @@ with st.sidebar:
     data['burn_subtitles'] = burn_subtitles
 
     if burn_subtitles:
+        st.markdown(f"**{t['subtitle_style_section']}**")
+        st.caption(t['subtitle_style_help'])
+
         # Map display labels to API values
         subtitle_lang_options = [t['subtitle_translation_none'], '中文', 'English']
         subtitle_lang_values = [None, 'Simplified Chinese', 'English']
@@ -753,32 +821,115 @@ with st.sidebar:
         )
         subtitle_translation = subtitle_lang_values[subtitle_lang_options.index(subtitle_lang_label)]
         data['subtitle_translation'] = subtitle_translation
+
+        subtitle_preset_values = ['default', 'clean', 'high_contrast', 'stream']
+        subtitle_preset_labels = {
+            'en': {'default': 'Default', 'clean': 'Clean', 'high_contrast': 'High Contrast', 'stream': 'Stream'},
+            'zh': {'default': '默认', 'clean': '简洁', 'high_contrast': '高对比', 'stream': '直播'},
+        }
+        subtitle_size_values = ['small', 'medium', 'large']
+        subtitle_size_labels = {
+            'en': {'small': 'Small', 'medium': 'Medium', 'large': 'Large'},
+            'zh': {'small': '小', 'medium': '中', 'large': '大'},
+        }
+        subtitle_position_values = ['bottom', 'lower_middle', 'middle']
+        subtitle_position_labels = {
+            'en': {'bottom': 'Bottom', 'lower_middle': 'Lower Middle', 'middle': 'Middle'},
+            'zh': {'bottom': '底部', 'lower_middle': '偏下居中', 'middle': '居中'},
+        }
+        subtitle_background_values = ['none', 'light_box', 'solid_box']
+        subtitle_background_labels = {
+            'en': {
+                'none': 'None',
+                'light_box': 'Light Box',
+                'solid_box': 'Solid Box',
+            },
+            'zh': {
+                'none': '无',
+                'light_box': '浅色底框',
+                'solid_box': '实心底框',
+            },
+        }
+
+        subtitle_style_preset = st.selectbox(
+            t['subtitle_style_preset'],
+            options=subtitle_preset_values,
+            index=subtitle_preset_values.index(data.get('subtitle_style_preset', 'default'))
+            if data.get('subtitle_style_preset', 'default') in subtitle_preset_values else 0,
+            format_func=lambda value: subtitle_preset_labels[current_lang][value],
+            key=f"subtitle_style_preset_{st.session_state.reset_counter}"
+        )
+        subtitle_style_font_size = st.selectbox(
+            t['subtitle_style_font_size'],
+            options=subtitle_size_values,
+            index=subtitle_size_values.index(data.get('subtitle_style_font_size', 'medium'))
+            if data.get('subtitle_style_font_size', 'medium') in subtitle_size_values else 1,
+            format_func=lambda value: subtitle_size_labels[current_lang][value],
+            key=f"subtitle_style_font_size_{st.session_state.reset_counter}"
+        )
+        subtitle_style_vertical_position = st.selectbox(
+            t['subtitle_style_vertical_position'],
+            options=subtitle_position_values,
+            index=subtitle_position_values.index(data.get('subtitle_style_vertical_position', 'bottom'))
+            if data.get('subtitle_style_vertical_position', 'bottom') in subtitle_position_values else 0,
+            format_func=lambda value: subtitle_position_labels[current_lang][value],
+            key=f"subtitle_style_vertical_position_{st.session_state.reset_counter}"
+        )
+        subtitle_style_background_style = st.selectbox(
+            t['subtitle_style_background_style'],
+            options=subtitle_background_values,
+            index=subtitle_background_values.index(data.get('subtitle_style_background_style', 'none'))
+            if data.get('subtitle_style_background_style', 'none') in subtitle_background_values else 0,
+            format_func=lambda value: subtitle_background_labels[current_lang][value],
+            key=f"subtitle_style_background_style_{st.session_state.reset_counter}"
+        )
+
+        data['subtitle_style_preset'] = subtitle_style_preset
+        data['subtitle_style_font_size'] = subtitle_style_font_size
+        data['subtitle_style_vertical_position'] = subtitle_style_vertical_position
+        data['subtitle_style_background_style'] = subtitle_style_background_style
+
+        st.caption(t['subtitle_preview_help'])
+        preview_bytes = render_subtitle_style_preview(
+            subtitle_style_preset,
+            subtitle_style_font_size,
+            subtitle_style_vertical_position,
+            subtitle_style_background_style,
+            subtitle_translation,
+            current_lang,
+        )
+        if preview_bytes:
+            st.image(preview_bytes, caption=t['subtitle_preview'], width='stretch')
+        else:
+            st.warning(t['subtitle_preview_failed'])
     else:
         subtitle_translation = None
         data['subtitle_translation'] = None
+        data['subtitle_style_preset'] = 'default'
+        data['subtitle_style_font_size'] = 'medium'
+        data['subtitle_style_vertical_position'] = 'bottom'
+        data['subtitle_style_background_style'] = 'none'
 
-    add_titles = st.checkbox(
-        t['add_titles'],
-        value=data['add_titles'],
-        help=t['add_titles_help'],
-        key=f"add_titles_{st.session_state.reset_counter}"
-    )
-    data['add_titles'] = add_titles
-
-    use_background = st.checkbox(
-        t['use_background'],
-        value=data['use_background'],
-        help=t['use_background_help'],
-        key=f"use_background_{st.session_state.reset_counter}"
-    )
-    data['use_background'] = use_background
-
-    # Background info notice (only shown if use_background is checked)
-    if use_background:
-        # st.subheader("📝 Background Information")
-        st.info(t['background_info_notice'])
-    
     with st.expander(t['advanced_options']):
+        add_titles = st.checkbox(
+            t['add_titles'],
+            value=data['add_titles'],
+            help=t['add_titles_help'],
+            key=f"add_titles_{st.session_state.reset_counter}"
+        )
+        data['add_titles'] = add_titles
+
+        use_background = st.checkbox(
+            t['use_background'],
+            value=data['use_background'],
+            help=t['use_background_help'],
+            key=f"use_background_{st.session_state.reset_counter}"
+        )
+        data['use_background'] = use_background
+
+        if use_background:
+            st.info(t['background_info_notice'])
+
         force_whisper = st.checkbox(
             t['force_whisper'],
             value=data['force_whisper'],
@@ -896,6 +1047,11 @@ def process_video_worker(job, progress_callback):
         speaker_references_dir=options.get('speaker_references_dir'),
         burn_subtitles=options.get('burn_subtitles', False),
         subtitle_translation=options.get('subtitle_translation') or None,
+        subtitle_style_preset=options.get('subtitle_style_preset', 'default'),
+        subtitle_style_font_size=options.get('subtitle_style_font_size', 'medium'),
+        subtitle_style_vertical_position=options.get('subtitle_style_vertical_position', 'bottom'),
+        subtitle_style_bilingual_layout='auto',
+        subtitle_style_background_style=options.get('subtitle_style_background_style', 'none'),
         mode=options.get('mode', 'engaging_moments'),
         user_intent=options.get('user_intent') or None,
         normalize_boundaries=options.get('normalize_boundaries', True),
@@ -1196,6 +1352,10 @@ if process_clicked:
             'speaker_references_dir': speaker_references_dir or None,
             'burn_subtitles': burn_subtitles,
             'subtitle_translation': subtitle_translation or None,
+            'subtitle_style_preset': data.get('subtitle_style_preset', 'default'),
+            'subtitle_style_font_size': data.get('subtitle_style_font_size', 'medium'),
+            'subtitle_style_vertical_position': data.get('subtitle_style_vertical_position', 'bottom'),
+            'subtitle_style_background_style': data.get('subtitle_style_background_style', 'none'),
             'user_intent': user_intent or None,
         }
         

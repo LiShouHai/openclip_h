@@ -52,7 +52,6 @@ test_final/
 debug_responses/
 archive/
 examples/
-tests/
 .claude/settings.json
 .claude/settings.local.json
 
@@ -60,14 +59,22 @@ tests/
 artistic_test_results/
 artistic_banner_test/
 all_artistic_styles_showcase/
+.pytest_cache/
+tests/__pycache__/
+smoke_output/
+tmp_font_test/
 
 # Temporary files
 *.tmp
 *.log
 demo/demo_skill.mov
+.uv-cache/
+.local-fonts/
+fonts-noto-cjk_*.deb
 
 # Runtime data
 jobs/
+persistent_data.json
 
 # Local development config
 AGENTS.md

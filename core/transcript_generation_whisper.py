@@ -12,7 +12,9 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Callable, Any
-from core.config import WHISPER_MODEL
+import whisper
+from core.config import WHISPER_MODEL, TRANSCRIPT_LANGUAGE_DETECT_MODEL
+from core.transcript_generation_paraformer import ParaformerTranscriptProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,31 @@ try:
     from core.transcript_generation_whisperx import TranscriptProcessorWhisperX, WHISPERX_AVAILABLE
 except ImportError:
     WHISPERX_AVAILABLE = False
+
+
+def select_transcript_backend(
+    detected_language: str,
+    paraformer_available: bool,
+    use_whisperx: bool,
+) -> str:
+    """Choose the transcript backend for a detected language."""
+    language = (detected_language or "").lower()
+    if language.startswith("zh") and paraformer_available:
+        return "paraformer"
+    return "whisperx" if use_whisperx else "whisper"
+
+
+def summarize_transcript_sources(sources: List[str]) -> str:
+    """Summarize one or more transcript source names into a display value."""
+    unique_sources = []
+    for source in sources:
+        if source and source not in unique_sources:
+            unique_sources.append(source)
+    if not unique_sources:
+        return "unknown"
+    if len(unique_sources) == 1:
+        return unique_sources[0]
+    return "mixed:" + ",".join(unique_sources)
 
 def run_whisper_cli(file_path, model_name=WHISPER_MODEL, language=None, output_format="srt", output_dir=None):
     """
@@ -40,7 +67,7 @@ def run_whisper_cli(file_path, model_name=WHISPER_MODEL, language=None, output_f
     print(f"📝 Output format: {output_format}")
 
     # Build the whisper command
-    cmd = ["whisper", file_path, "--model", model_name, "--output_format", output_format]
+    cmd = [sys.executable, "-m", "whisper", file_path, "--model", model_name, "--output_format", output_format]
 
     if output_dir:
         cmd.extend(["--output_dir", str(output_dir)])
@@ -72,7 +99,7 @@ def run_whisper_cli(file_path, model_name=WHISPER_MODEL, language=None, output_f
         print(f"❌ Command failed: {e}")
         return False
     except FileNotFoundError:
-        print("❌ Whisper CLI not found. Make sure it's installed and in your PATH.")
+        print("❌ Whisper module not found in the current Python environment.")
         return False
 
 def demonstrate_whisper():
@@ -167,8 +194,11 @@ class TranscriptProcessor:
         self.whisper_model = whisper_model
         self.language = language  # None = auto-detect
         self.enable_diarization = enable_diarization
+        self.language_detection_model = TRANSCRIPT_LANGUAGE_DETECT_MODEL
         # WhisperX is required for diarization; enable it automatically when requested.
         self.use_whisperx = enable_diarization and WHISPERX_AVAILABLE
+        self.paraformer_processor = ParaformerTranscriptProcessor()
+        self._language_detector = None
 
         if enable_diarization and not WHISPERX_AVAILABLE:
             logger.warning("⚠️  Speaker diarization requested but WhisperX is not installed. Falling back to openai-whisper (no speaker labels). Run: uv sync --extra speakers")
@@ -181,6 +211,14 @@ class TranscriptProcessor:
                 speaker_references_dir=speaker_references_dir,
             )
 
+        if self.paraformer_processor.is_available():
+            logger.info(f"🈶 Chinese ASR backend: Paraformer ({self.paraformer_processor.project_dir})")
+        else:
+            logger.warning(
+                "⚠️  Paraformer is unavailable; Chinese audio will fall back to Whisper. "
+                f"Reason: {self.paraformer_processor.availability_error()}"
+            )
+
     async def process_transcripts(self,
                                 subtitle_path: str,
                                 video_files: List[str] or str,
@@ -191,13 +229,8 @@ class TranscriptProcessor:
         has_existing = subtitle_path and os.path.exists(subtitle_path)
 
         if force_whisper or not has_existing:
-            # Scenario 1: Generate new transcript
-            if self.whisperx_processor:
-                logger.info("⚡ Using WhisperX for transcript generation")
-                return await self._generate_whisperx_transcripts(video_files, progress_callback)
-            else:
-                logger.info("🤖 Using Whisper for transcript generation")
-                return await self._generate_whisper_transcripts(video_files, progress_callback)
+            logger.info("📝 Generating transcripts locally with automatic language routing")
+            return await self._generate_routed_transcripts(video_files, progress_callback)
         else:
             # Scenario 2: Use existing transcript
             if self.whisperx_processor and self.enable_diarization:
@@ -218,6 +251,135 @@ class TranscriptProcessor:
                     'transcript_path': subtitle_path if isinstance(video_files, str) else '',
                     'transcript_parts': [] if isinstance(video_files, str) else self._get_existing_transcript_parts(video_files)
                 }
+
+    def _get_language_detector(self):
+        if self._language_detector is None:
+            self._language_detector = whisper.load_model(self.language_detection_model)
+        return self._language_detector
+
+    def _detect_transcript_language(self, media_path: str) -> str:
+        media_path = str(media_path)
+        try:
+            detector = self._get_language_detector()
+            audio = whisper.load_audio(media_path)
+            audio = whisper.pad_or_trim(audio)
+            mel = whisper.log_mel_spectrogram(audio).to(detector.device)
+            _, probs = detector.detect_language(mel)
+            detected_language, confidence = max(probs.items(), key=lambda item: item[1])
+            logger.info(
+                f"🔎 Transcript language for {Path(media_path).name}: "
+                f"{detected_language} ({confidence:.1%})"
+            )
+            return detected_language
+        except Exception as e:
+            logger.warning(
+                f"⚠️  Transcript language detection failed for {Path(media_path).name} "
+                f"({e}). Falling back to English/Whisper."
+            )
+            return "en"
+
+    async def _generate_routed_transcripts(
+        self,
+        video_files: List[str] or str,
+        progress_callback: Optional[Callable[[str, float], None]],
+    ) -> Dict[str, Any]:
+        """Generate transcripts with Whisper for English and Paraformer for Chinese."""
+        if isinstance(video_files, str):
+            video_files = [video_files]
+
+        transcript_parts = []
+        transcript_sources = []
+        total_files = len(video_files)
+
+        for i, video_file in enumerate(video_files):
+            video_path = Path(video_file)
+            video_dir = video_path.parent
+            base_progress = 35 + (i / total_files) * 13 if total_files else 35
+
+            detected_language = self._detect_transcript_language(str(video_path))
+            backend = select_transcript_backend(
+                detected_language=detected_language,
+                paraformer_available=self.paraformer_processor.is_available(),
+                use_whisperx=self.use_whisperx,
+            )
+
+            if progress_callback:
+                progress_callback(
+                    f"Generating transcript {i+1}/{total_files} with {backend}...",
+                    base_progress,
+                )
+
+            logger.info(
+                f"🔀 Transcript backend for {video_path.name}: {backend} "
+                f"(detected language: {detected_language})"
+            )
+
+            srt_path = ""
+            source = backend
+
+            try:
+                if backend == "paraformer":
+                    srt_path, _ = self.paraformer_processor.transcribe_chinese_to_srt(
+                        str(video_path),
+                        video_dir,
+                    )
+                    logger.info(f"✅ Paraformer generated: {Path(srt_path).name}")
+                    if self.whisperx_processor and self.enable_diarization:
+                        logger.info("⚡ Running WhisperX diarization on Paraformer transcript")
+                        srt_path = await self.whisperx_processor.add_speakers_to_existing_transcript(
+                            srt_path,
+                            str(video_path),
+                            progress_callback,
+                        )
+                        source = "paraformer_diarized"
+                elif backend == "whisperx":
+                    srt_path = await self.whisperx_processor.transcribe_with_whisperx(
+                        str(video_path),
+                        progress_callback,
+                    )
+                    if srt_path:
+                        logger.info(f"✅ WhisperX generated: {Path(srt_path).name}")
+                else:
+                    success = run_whisper_cli(
+                        str(video_path),
+                        model_name=self.whisper_model,
+                        language=detected_language,
+                        output_format="srt",
+                        output_dir=str(video_dir),
+                    )
+                    if success:
+                        srt_path = str(video_dir / f"{video_path.stem}.srt")
+                        logger.info(f"✅ Whisper generated: {Path(srt_path).name}")
+            except Exception as e:
+                if backend == "paraformer":
+                    logger.warning(
+                        f"⚠️  Paraformer failed for {video_path.name} ({e}). Falling back to Whisper."
+                    )
+                    source = "whisper_fallback"
+                    success = run_whisper_cli(
+                        str(video_path),
+                        model_name=self.whisper_model,
+                        language=detected_language,
+                        output_format="srt",
+                        output_dir=str(video_dir),
+                    )
+                    if success:
+                        srt_path = str(video_dir / f"{video_path.stem}.srt")
+                        logger.info(f"✅ Whisper fallback generated: {Path(srt_path).name}")
+                else:
+                    logger.error(f"❌ {backend} failed for {video_path.name}: {e}")
+
+            if srt_path and Path(srt_path).exists():
+                transcript_parts.append(str(srt_path))
+                transcript_sources.append(source)
+            else:
+                logger.error(f"❌ Transcript generation failed for {video_path.name}")
+
+        return {
+            'source': summarize_transcript_sources(transcript_sources),
+            'transcript_path': transcript_parts[0] if len(transcript_parts) == 1 else '',
+            'transcript_parts': transcript_parts,
+        }
     
     async def _generate_whisper_transcripts(self, 
                                           video_files: List[str] or str,

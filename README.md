@@ -57,7 +57,7 @@
 
 ## ✨ 特性
 - **灵活输入**：支持 Bilibili、YouTube URL 或本地视频文件
-- **智能转录**：优先使用平台字幕，回退到 Whisper
+- **智能转录**：优先使用平台字幕；本地 ASR 会自动按语言路由，英文使用 Whisper，中文使用 Paraformer
 - **说话人识别**（预览版）：自动识别谁在说话，将真实姓名标注到字幕中，适合访谈、座谈、辩论和播客
 - **AI 分析**：基于内容、互动和娱乐价值识别精彩时刻；支持 `--user-intent` 引导 AI 聚焦特定关注点
 - **剪辑生成**：提取最精彩时刻为独立视频剪辑，自动生成字幕文件、标题和封面图片
@@ -331,7 +331,7 @@ uv run python video_orchestrator.py \
 | `--cookies` | Netscape 格式 `cookies.txt` 文件路径；提供后优先于 `--browser` | 无 |
 | `--js-runtime` | 仅用于 YouTube 下载的 JavaScript 运行时策略（`auto`/`deno`/`node`/`none`） | `auto` |
 | `--js-runtime-path` | 仅用于 YouTube 下载的 JavaScript 运行时可执行文件路径（高级选项） | 无 |
-| `--force-whisper` | 强制使用 Whisper 转录（忽略平台字幕） | 关 |
+| `--force-whisper` | 强制使用本地 ASR 转录（忽略平台字幕）；英文使用 Whisper，中文使用 Paraformer | 关 |
 | `--use-background` | 使用背景信息辅助分析 | 关 |
 | `--normalize-boundaries` / `--no-normalize-boundaries` | 剪辑生成时将开始/结束时间对齐到附近字幕边界；优先句子边界，其次字幕间停顿。默认开启，可用 `--no-normalize-boundaries` 关闭 | 开 |
 | `--user-intent` | 用自然语言描述关注重点（如 `"关于 AI 风险的观点"`），引导 AI 优先选取相关片段 | 无 |
@@ -506,7 +506,7 @@ AI 分析（每个片段）
 **说话人未被识别（显示 SPEAKER_XX 而非姓名）**：参考音频相似度低于阈值（默认 0.7）。尝试使用更长、更清晰的参考片段（推荐 10–30 秒），确保片段中只有一位说话人。
 
 ### 中文文本不显示
-**原因**：缺少中文字体。macOS 自动检测（STHeiti、PingFang），Windows 需安装宋体或微软雅黑，Linux 安装 `fonts-wqy-zenhei`。
+**原因**：缺少中文字体。OpenClip 会自动检测 macOS（STHeiti、PingFang）、Windows（宋体、微软雅黑）以及 Linux 上常见的 Noto / WenQuanYi / Source Han 字体；如果都找不到，会直接提示缺少字体而不是继续生成异常文字。Linux 可安装 `fonts-noto-cjk`、`fonts-wqy-zenhei` 或 `adobe-source-han-sans-otc-fonts`。
 
 </details>
 

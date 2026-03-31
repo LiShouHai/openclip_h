@@ -5,11 +5,11 @@ Cover Image Generator - Create video cover images with styled text overlays
 import logging
 from pathlib import Path
 from typing import Tuple, Dict
-import os
 
 from moviepy import VideoFileClip
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+from core.font_utils import build_missing_font_message, find_best_font, is_cjk_language
 
 logger = logging.getLogger(__name__)
 
@@ -33,39 +33,30 @@ class CoverImageGenerator:
     """Generate cover images with styled text overlays from video frames"""
     
     def __init__(self, language: str = "zh"):
+        self.language = language
         self.font_path = self._find_font(language)
+        if not self.font_path:
+            logger.warning(build_missing_font_message(language))
 
     def _find_font(self, language: str):
         """Find best available font for the given output language"""
-        if language == "vi":
-            # Vietnamese needs Latin Extended coverage; Arial Unicode covers both CJK and Latin Extended
-            fonts = [
-                "/Library/Fonts/Arial Unicode.ttf",
-                "/Library/Fonts/Arial Bold.ttf",
-                "/Library/Fonts/Arial.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                # CJK fonts as last resort (may render Vietnamese poorly)
-                "/System/Library/Fonts/PingFang.ttc",
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-            ]
-        else:
-            # Chinese/English: prefer purpose-built CJK bold fonts
-            fonts = [
-                "/System/Library/Fonts/PingFang.ttc",  # Has bold weight
-                "/System/Library/Fonts/STHeiti Medium.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-                "C:/Windows/Fonts/msyhbd.ttc",  # Microsoft YaHei Bold
-                "C:/Windows/Fonts/simhei.ttf",  # SimHei (bold)
-                "/System/Library/Fonts/STHeiti Light.ttc",
-                "C:/Windows/Fonts/msyh.ttc",
-                "C:/Windows/Fonts/simsun.ttc",
-                "/Library/Fonts/Arial Unicode.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            ]
-        for font_path in fonts:
-            if os.path.exists(font_path):
-                return font_path
-        return None
+        return find_best_font(
+            language=language,
+            prefer_bold=True,
+            allow_generic_fallback=not is_cjk_language(language),
+        )
+
+    def _require_font(self):
+        if self.font_path:
+            return
+        raise RuntimeError(build_missing_font_message(self.language))
+
+    def _load_font(self, font_size: int):
+        self._require_font()
+        try:
+            return ImageFont.truetype(self.font_path, font_size)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load font {self.font_path}: {exc}") from exc
     
     def generate_cover(self,
                       video_path: str,
@@ -95,6 +86,7 @@ class CoverImageGenerator:
 
 
         try:
+            self._require_font()
             logger.info(f"🖼️  Generating cover image from: {Path(video_path).name}")
             
             # Extract frame from video
@@ -218,13 +210,7 @@ class CoverImageGenerator:
         
         while font_size >= min_font_size:
             # Try current font size
-            try:
-                if self.font_path:
-                    test_font = ImageFont.truetype(self.font_path, font_size)
-                else:
-                    test_font = ImageFont.load_default()
-            except:
-                test_font = ImageFont.load_default()
+            test_font = self._load_font(font_size)
             
             # Check how many lines this would create
             wrapped_lines = self._wrap_text(text, test_font, max_width, draw)
@@ -237,13 +223,7 @@ class CoverImageGenerator:
             font_size -= 2
         
         # If we couldn't fit in max_lines, return the smallest font we tried
-        try:
-            if self.font_path:
-                return ImageFont.truetype(self.font_path, min_font_size)
-            else:
-                return ImageFont.load_default()
-        except:
-            return ImageFont.load_default()
+        return self._load_font(min_font_size)
     
     def _wrap_text(self, text: str, font: ImageFont.FreeTypeFont, max_width: int, draw: ImageDraw.Draw) -> list:
         """Wrap text to fit within max_width (handles Chinese, English, and mixed text)"""

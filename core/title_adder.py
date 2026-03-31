@@ -15,6 +15,8 @@ import numpy as np
 import os
 
 from core.file_string_utils import FileStringUtils
+from core.font_utils import build_missing_font_message, find_best_font, is_cjk_language
+from core.subtitle_burner import SubtitleBurner
 
 logger = logging.getLogger(__name__)
 
@@ -31,48 +33,36 @@ class ArtisticTextRenderer:
     """Artistic text renderer for Chinese and other languages"""
     
     def __init__(self, language: str = "zh"):
+        self.language = language
         self.font_path = self._find_font(language)
         self.font_cache = {}
+        if not self.font_path:
+            logger.warning(build_missing_font_message(language))
 
     def _find_font(self, language: str):
         """Find best available font for the given output language"""
-        if language == "vi":
-            # Vietnamese needs Latin Extended coverage; Arial Unicode covers both CJK and Latin Extended
-            fonts = [
-                "/Library/Fonts/Arial Unicode.ttf",
-                "/Library/Fonts/Arial Bold.ttf",
-                "/Library/Fonts/Arial.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                # CJK fonts as last resort (may render Vietnamese poorly)
-                "/System/Library/Fonts/STHeiti Light.ttc",
-                "/System/Library/Fonts/PingFang.ttc",
-            ]
-        else:
-            # Chinese/English: prefer purpose-built CJK fonts
-            fonts = [
-                "/System/Library/Fonts/STHeiti Light.ttc",
-                "/System/Library/Fonts/PingFang.ttc",
-                "/System/Library/Fonts/Hiragino Sans GB.ttc",
-                "C:/Windows/Fonts/simsun.ttc",
-                "C:/Windows/Fonts/msyh.ttc",
-                "/Library/Fonts/Arial Unicode.ttf",
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            ]
-        for font_path in fonts:
-            if os.path.exists(font_path):
-                return font_path
-        return None
+        return find_best_font(
+            language=language,
+            prefer_bold=False,
+            allow_generic_fallback=not is_cjk_language(language),
+        )
+
+    def _require_font(self):
+        if self.font_path:
+            return
+        raise RuntimeError(build_missing_font_message(self.language))
+
+    def _load_font(self, font_size: int):
+        self._require_font()
+        try:
+            return ImageFont.truetype(self.font_path, font_size)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load font {self.font_path}: {exc}") from exc
     
     def _get_font(self, font_size):
         """Get cached font"""
         if font_size not in self.font_cache:
-            if self.font_path:
-                try:
-                    self.font_cache[font_size] = ImageFont.truetype(self.font_path, font_size)
-                except:
-                    self.font_cache[font_size] = ImageFont.load_default()
-            else:
-                self.font_cache[font_size] = ImageFont.load_default()
+            self.font_cache[font_size] = self._load_font(font_size)
         return self.font_cache[font_size]
     
     def create_artistic_text(self, text, font_size=35, style='gradient_3d'):
@@ -612,7 +602,7 @@ class TitleAdder:
                     filter_complex = (
                         f"[0:v]pad=iw:ih+180:0:120:black[v1];"
                         f"[v1][1:v]overlay=x={overlay_x}:y={overlay_y}[v2];"
-                        f"[v2]ass={ass_path}[out]"
+                        f"[v2]{SubtitleBurner.build_ass_filter_value(ass_path, self.language)}[out]"
                     )
                 else:
                     filter_complex = (

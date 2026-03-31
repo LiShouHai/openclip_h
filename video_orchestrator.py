@@ -231,7 +231,7 @@ class VideoOrchestrator:
         
         logger.info(f"🎬 Video Orchestrator initialized")
         logger.info(f"📁 Output directory: {self.output_dir}")
-        logger.info(f"🤖 Whisper model: {whisper_model}")
+        logger.info(f"🤖 English Whisper model: {whisper_model}")
 
     async def process_video(self,
                           source: str,
@@ -245,7 +245,7 @@ class VideoOrchestrator:
 
         Args:
             source: Video URL (Bilibili/YouTube) or local video file path
-            force_whisper: Force transcript generation via Whisper (ignore platform subtitles)
+            force_whisper: Force local ASR transcript generation (ignore platform subtitles)
             custom_filename: Custom filename template
             skip_download: Skip video download (use existing downloaded video)
             skip_transcript: Skip transcript generation (use existing transcript files)
@@ -1121,7 +1121,8 @@ Note: Set QWEN_API_KEY or OPENROUTER_API_KEY environment variable based on your 
     parser.add_argument('-o', '--output', default='processed_videos',
                        help='Output directory (default: processed_videos)')
     parser.add_argument('--force-whisper', action='store_true',
-                       help='Force transcript generation via Whisper (ignore platform subtitles)')
+                       help='Force local ASR transcript generation (ignore platform subtitles). '
+                            'English uses Whisper; Chinese uses Paraformer.')
     parser.add_argument('--skip-download', action='store_true', default=SKIP_DOWNLOAD,
                        help='Skip video download and use existing downloaded video')
     parser.add_argument('--skip-transcript', action='store_true', default=SKIP_TRANSCRIPT,

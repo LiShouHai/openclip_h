@@ -11,7 +11,7 @@ import os
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass
 
-from core.config import LLM_CONFIG, API_KEY_ENV_VARS
+from core.config import LLM_CONFIG, API_KEY_ENV_VARS, _normalize_chat_completions_url
 
 
 @dataclass
@@ -30,12 +30,14 @@ class QwenAPIClient:
         
         Args:
             api_key: Your Qwen API key (can also be set via QWEN_API_KEY env var)
-            base_url: Base URL for Qwen API (optional, uses config value if not provided)
+            base_url: Base URL for Qwen API (optional, accepts either an API root or full endpoint)
         """
         self.api_key = api_key or os.getenv(API_KEY_ENV_VARS["qwen"])
-        self.base_url = base_url or LLM_CONFIG["qwen"]["base_url"]
+        resolved_base_url = base_url or os.getenv("QWEN_BASE_URL") or LLM_CONFIG["qwen"]["base_url"]
+        self.base_url = _normalize_chat_completions_url(resolved_base_url)
         self.legacy_base_url = LLM_CONFIG["qwen"]["legacy_base_url"]
         self.legacy_models = LLM_CONFIG["qwen"]["legacy_models"]
+        self.default_model = os.getenv("QWEN_MODEL") or LLM_CONFIG["qwen"]["default_model"]
         
         if not self.api_key:
             raise ValueError(f"API key is required. Set {API_KEY_ENV_VARS['qwen']} environment variable or pass api_key parameter.")
@@ -104,7 +106,7 @@ class QwenAPIClient:
             API response dictionary
         """
         # Use default values from config if not provided
-        model = model or LLM_CONFIG["qwen"]["default_model"]
+        model = model or self.default_model
         max_tokens = max_tokens or LLM_CONFIG["qwen"]["default_params"]["max_tokens"]
         temperature = temperature or LLM_CONFIG["qwen"]["default_params"]["temperature"]
         top_p = top_p or LLM_CONFIG["qwen"]["default_params"]["top_p"]
@@ -150,7 +152,7 @@ class QwenAPIClient:
             Generated response text
         """
         # Use default model from config if not provided
-        model = model or LLM_CONFIG["qwen"]["default_model"]
+        model = model or self.default_model
         
         messages = [QwenMessage(role="user", content=prompt)]
         response = self.chat_completion(messages, model=model)
@@ -185,7 +187,7 @@ class QwenAPIClient:
             Generated response text
         """
         # Use default model from config if not provided
-        model = model or LLM_CONFIG["qwen"]["default_model"]
+        model = model or self.default_model
         
         conversation = []
         

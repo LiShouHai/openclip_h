@@ -57,7 +57,7 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## ✨ Features
 - **Flexible Input**: Bilibili/YouTube URLs or local video files
-- **Smart Transcription**: Uses platform subtitles when available, falls back to Whisper
+- **Smart Transcription**: Uses platform subtitles when available; local ASR auto-routes by language, using Whisper for English and Paraformer for Chinese
 - **Speaker Identification** (Preview): automatically identifies who is speaking and labels transcripts with real names — great for interviews, panels, debates, and podcasts
 - **AI Analysis**: Identifies engaging moments based on content, interaction, and entertainment value; supports `--user-intent` to focus the AI on what you care about
 - **Clip Generation**: Extracts the most engaging moments as standalone video clips, automatically generating subtitle files, titles, and cover images
@@ -331,7 +331,7 @@ Remote video downloads sometimes hit login checks, bot protection, or platform r
 | `--cookies` | Path to a Netscape-format `cookies.txt` file; takes precedence over `--browser` | None |
 | `--js-runtime` | JavaScript runtime strategy for YouTube downloads only (`auto`/`deno`/`node`/`none`) | `auto` |
 | `--js-runtime-path` | Path to the JavaScript runtime executable for YouTube only (advanced) | None |
-| `--force-whisper` | Force Whisper transcription (ignore platform subtitles) | Off |
+| `--force-whisper` | Force local ASR transcription (ignore platform subtitles); English uses Whisper and Chinese uses Paraformer | Off |
 | `--use-background` | Use background info for analysis | Off |
 | `--normalize-boundaries` / `--no-normalize-boundaries` | Align clip starts and ends to nearby subtitle boundaries during clip generation; prefers sentence boundaries first and subtitle-gap pauses second. Enabled by default, disable with `--no-normalize-boundaries` | On |
 | `--user-intent` | Natural language description of what you're looking for (e.g. `"moments about AI risks"`); steers LLM clip selection and ranking | None |
@@ -506,7 +506,7 @@ Output Ready!
 **Speakers not matched (showing SPEAKER_XX instead of names)**: The reference audio similarity is below the threshold (default 0.7). Try a longer, cleaner reference clip (10–30 seconds recommended) with only one speaker throughout.
 
 ### Chinese text not displaying
-**Cause**: Missing Chinese fonts. macOS auto-detects (STHeiti, PingFang), Windows needs SimSun or Microsoft YaHei, Linux needs `fonts-wqy-zenhei`.
+**Cause**: Missing Chinese fonts. OpenClip auto-detects common CJK fonts on macOS (STHeiti, PingFang), Windows (SimSun, Microsoft YaHei), and Linux (Noto / WenQuanYi / Source Han). If none are available, it now reports a clear missing-font error instead of silently rendering broken text. On Linux, install `fonts-noto-cjk`, `fonts-wqy-zenhei`, or `adobe-source-han-sans-otc-fonts`.
 
 </details>
 

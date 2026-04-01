@@ -17,13 +17,16 @@
 
 ## 📢 最新动态
 
+- **2026-04-01**:
+  - 新增 `custom_openai` 提供商，可在 Streamlit 或 CLI 中自定义 `LLM Model` 与 `LLM Base URL`，对接本地或自建 OpenAI 兼容接口
+  - Paraformer helper 默认改为仓库相对路径 `third_party/funasr-paraformer`，避免在配置里写入本机绝对路径
 - **2026-03-30**:
   - 新增默认开启的剪辑边界修正，目标是让高光片段的开始和结束更自然，减少突兀截断
   - 在 Streamlit UI 中支持 Bilibili 多 P 视频一键创建任务、后台任务重试，以及重启后取消 pending 任务，感谢 [@xenoamess](https://github.com/xenoamess)
 - **2026-03-25**:
   - 新增 [Cookie 使用建议](#cookie-guidance) 与更清晰的 Streamlit `Cookie 模式`；远程视频下载可按 `不使用 cookies` → `浏览器 cookies` → `Cookies 文件` 的顺序尝试
 - **2026-03-24**:
-  - 新增 [GLM（智谱AI）](https://bigmodel.cn) 和 [MiniMax](https://minimaxi.com) 作为 LLM 提供商，现支持 Qwen、OpenRouter、GLM、MiniMax 四个提供商
+  - 新增 [GLM（智谱AI）](https://bigmodel.cn) 和 [MiniMax](https://minimaxi.com) 作为 LLM 提供商，现支持 Qwen、OpenRouter、GLM、MiniMax 与 `custom_openai`
 - **2026-03-11**:
   - OpenClip 现已上架 skills.sh，可通过 `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` 在任意目录安装为 Agent Skill，并让 Agent 调用
 - **2026-03-08**:
@@ -61,7 +64,7 @@
 - **说话人识别**（预览版）：自动识别谁在说话，将真实姓名标注到字幕中，适合访谈、座谈、辩论和播客
 - **AI 分析**：基于内容、互动和娱乐价值识别精彩时刻；支持 `--user-intent` 引导 AI 聚焦特定关注点
 - **剪辑生成**：提取最精彩时刻为独立视频剪辑，自动生成字幕文件、标题和封面图片
-- **字幕烧录**（可选）：将 SRT 字幕硬烧到视频画面中，可选通过 Qwen 翻译成目标语言后烧录双语字幕
+- **字幕烧录**（可选）：将 SRT 字幕硬烧到视频画面中，可选通过当前选定的 LLM 提供商翻译成目标语言后烧录双语字幕
 - **背景上下文**：可选的添加背景信息（如主播姓名等）以获得更好的分析
 - **三界面支持**：Streamlit 网页界面，Agent Skills 和命令行界面，满足不同用户需求
 - **Agent Skills**：内置 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和 [TRAE](https://www.trae.ai/) agent skill，用自然语言即可处理视频
@@ -85,11 +88,12 @@
   - Windows: 从 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) 下载 **full** 版本
   </details>
 
-- **LLM API Key**（选择其一）
+- **LLM API Key / 接口配置**（选择其一）
   - **Qwen API Key** - 从[阿里云](https://dashscope.aliyun.com/)获取密钥（默认使用 qwen3.5-flash 模型）
   - **OpenRouter API Key** - 从[OpenRouter](https://openrouter.ai/)获取密钥（默认使用 stepfun/step-3.5-flash:free 模型）
   - **GLM API Key** - 从[智谱AI](https://open.bigmodel.cn/)获取密钥（默认使用 glm-4.7 模型）
   - **MiniMax API Key** - 从[MiniMax](https://platform.minimaxi.com/)获取密钥（默认使用 MiniMax-M2.7 模型）
+  - **Custom OpenAI 兼容接口** - 需要可访问的 OpenAI-compatible chat completions 接口；需配置 `CUSTOM_OPENAI_BASE_URL` 和 `CUSTOM_OPENAI_MODEL`，`CUSTOM_OPENAI_API_KEY` 可选
 
 - **Chrome / Firefox / Edge / Safari 浏览器**（可选）- 当你选择使用浏览器 Cookie 时，可用于远程视频下载身份验证
 - **Deno 或 Node**（可选，YouTube 下载可能会需要）- 提升 YouTube 下载稳定性。OpenClip 会自动检测并使用；如果你主要处理 YouTube，尤其是需要 cookies 的情况，建议安装
@@ -141,6 +145,13 @@ uv sync --extra paraformer
 third_party/funasr-paraformer
 ```
 
+推荐直接把 helper 仓库 checkout 到当前项目内，避免把开发机绝对路径写进配置：
+
+```bash
+mkdir -p third_party
+git clone <funasr-paraformer-helper-repo> third_party/funasr-paraformer
+```
+
 OpenClip 当前会在这个 helper 目录里查找两个脚本：
 
 - `tools/transcribe_long_audio.py`
@@ -163,14 +174,24 @@ export PARAFORMER_PROJECT_DIR=/path/to/funasr-paraformer
 
 ### 2. 设置 API 密钥（用于 AI 功能）
 
-根据你选择的 LLM 提供商，设置对应的环境变量（至少设置一个）：
+根据你选择的 LLM 提供商，设置对应的环境变量（至少配置一组）：
 
 ```bash
 export QWEN_API_KEY=your_api_key_here        # 通义千问
 export OPENROUTER_API_KEY=your_api_key_here   # OpenRouter
 export GLM_API_KEY=your_api_key_here          # 智谱AI GLM (bigmodel.cn 国内端点)
 export MINIMAX_API_KEY=your_api_key_here      # MiniMax (minimaxi.com 国内端点)
+export CUSTOM_OPENAI_API_KEY=your_api_key_here # custom_openai，可选
+export CUSTOM_OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+export CUSTOM_OPENAI_MODEL=Qwen/Qwen2.5-7B-Instruct
 ```
+
+说明：
+
+- `custom_openai` 适合对接 LM Studio、vLLM、One API、New API 等 OpenAI 兼容服务
+- `CUSTOM_OPENAI_BASE_URL` 可以是 API 根路径（如 `.../v1`），也可以直接写完整的 `/chat/completions` 接口
+- 如果你的兼容接口不要求 Bearer 鉴权，`CUSTOM_OPENAI_API_KEY` 可以留空
+- Streamlit 侧边栏支持按提供商覆盖 `LLM Model` 和 `LLM Base URL`；CLI 对应参数为 `--llm-model` 和 `--llm-base-url`
 
 ### 3. 运行流水线
 
@@ -185,10 +206,12 @@ uv run python -m streamlit run streamlit_app.py
 
 **使用流程：**
 1. 在侧边栏选择输入类型（视频 URL 或本地文件）
-2. 配置处理选项（LLM 提供商等）
+2. 配置处理选项（LLM 提供商、`LLM Model`、`LLM Base URL`、Cookie 模式等）
 3. 点击「Process Video」按钮开始处理
 4. 查看实时进度和最终结果
 5. 在结果区域预览生成的剪辑和封面
+
+如果选择 `custom_openai`，请在侧边栏填写 `LLM Model` 和 `LLM Base URL`；如果你的接口不需要鉴权，API Key 可以留空。
 
 **优势：** 无需记住命令行参数，提供可视化操作界面，适合所有用户。
 
@@ -305,7 +328,7 @@ uv run python video_orchestrator.py --speaker-references references/ "VIDEO_URL_
 <details>
 <summary>🔤 字幕烧录（可选）</summary>
 
-将 SRT 字幕文件硬烧到视频画面中（即使没有字幕播放器也能看到字幕）。支持原始字幕烧录，或通过 Qwen 翻译后同时烧录双语字幕。说话人标签（如 `[Sam Altman]`）会自动从画面中移除。
+将 SRT 字幕文件硬烧到视频画面中（即使没有字幕播放器也能看到字幕）。支持原始字幕烧录，或通过当前选定的 LLM 提供商翻译后同时烧录双语字幕。说话人标签（如 `[Sam Altman]`）会自动从画面中移除。
 
 **前提：ffmpeg 需包含 libass**（详见上方安装说明）
 
@@ -367,7 +390,9 @@ uv run python video_orchestrator.py \
 |------|------|--------|
 | `VIDEO_URL_OR_PATH` | 视频 URL 或本地文件路径（位置参数） | 必填 |
 | `-o`, `--output` | 自定义输出目录 | `processed_videos` |
-| `--llm-provider` | LLM 提供商（`qwen`、`openrouter`、`glm` 或 `minimax`） | `qwen` |
+| `--llm-provider` | LLM 提供商（`qwen`、`openrouter`、`glm`、`minimax` 或 `custom_openai`） | `qwen` |
+| `--llm-model` | 覆盖当前提供商使用的模型名；对 `custom_openai` 通常需要显式配置 | 提供商默认值 |
+| `--llm-base-url` | 覆盖当前提供商使用的 OpenAI 兼容 chat completions 地址；对 `custom_openai` 通常需要显式配置 | 提供商默认值 |
 | `--language` | 输出语言（`zh` 或 `en`） | `zh` |
 | `--browser` | 用于 cookie 的浏览器（`chrome`/`firefox`/`edge`/`safari`）；仅在显式提供时使用 | 无 |
 | `--cookies` | Netscape 格式 `cookies.txt` 文件路径；提供后优先于 `--browser` | 无 |
@@ -439,6 +464,15 @@ uv run python video_orchestrator.py \
 **跳过下载，重新处理已有视频：**
 ```bash
 uv run python video_orchestrator.py --skip-download --title-style crystal_ice "VIDEO_URL"
+```
+
+**使用自定义 OpenAI 兼容接口：**
+```bash
+uv run python video_orchestrator.py \
+  --llm-provider custom_openai \
+  --llm-model Qwen/Qwen2.5-7B-Instruct \
+  --llm-base-url http://127.0.0.1:8000/v1 \
+  "VIDEO_URL"
 ```
 
 ## 📁 输出结构
@@ -531,7 +565,7 @@ AI 分析（每个片段）
 - YouTube 只显示图片格式或报 `Requested format is not available`。OpenClip 会自动尝试 `deno` / `node` 作为 JS 运行时；如果仍失败，请安装其中之一，或用 `--js-runtime node --js-runtime-path /path/to/node` 显式指定。
 
 ### 未生成剪辑
-**原因**：缺少 API 密钥或分析失败。检查 `echo $QWEN_API_KEY`、`echo $OPENROUTER_API_KEY`、`echo $GLM_API_KEY` 或 `echo $MINIMAX_API_KEY`，并确认分析文件存在。
+**原因**：缺少 LLM 凭据 / 接口配置或分析失败。检查 `echo $QWEN_API_KEY`、`echo $OPENROUTER_API_KEY`、`echo $GLM_API_KEY`、`echo $MINIMAX_API_KEY`，或确认 `CUSTOM_OPENAI_BASE_URL` / `CUSTOM_OPENAI_MODEL` 已设置，并确认分析文件存在。
 
 ### FFmpeg 错误
 **原因**：FFmpeg 未安装或不在 PATH 中。运行 `ffmpeg -version` 检查，缺失则安装（macOS: `brew install ffmpeg`）。

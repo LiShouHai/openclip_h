@@ -17,9 +17,9 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## 📢 News
 
-- **2026-04-01**:
+- **2026-04-04**:
   - Added a `custom_openai` provider with configurable `LLM Model` and `LLM Base URL` in both Streamlit and CLI, so OpenClip can target local or self-hosted OpenAI-compatible endpoints
-  - Switched the default Paraformer helper location to the repo-relative `third_party/funasr-paraformer` to avoid committing machine-specific absolute paths
+  - Added [Paraformer support for Chinese ASR](#paraformer-installation), with local ASR automatically routing Chinese audio to Paraformer
 - **2026-03-30**:
   - Added default-on clip boundary refinement to make highlight clip starts and ends feel more natural and reduce abrupt cuts
   - Added Streamlit UI support for one-click job creation for multi-part Bilibili videos, background job retry, and cancelling pending jobs after restart, thanks to [@xenoamess](https://github.com/xenoamess)
@@ -31,13 +31,13 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
   - OpenClip is now on skills.sh — install it as an Agent Skill via `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` and let your agent invoke it from any directory
 - **2026-03-08**:
   - Added `--user-intent` argument — tell the AI what you're looking for in natural language (e.g. `--user-intent "moments about AI risks"`); steers clip selection and ranking at both the per-part and aggregation stages
+<details>
+<summary>Older updates</summary>
+
 - **2026-03-04**:
   - **Git History Notice**: A mistaken attempt to reduce GitHub repo size caused the git history to be rewritten. Sorry for the inconvenience. Existing users need to run `git fetch origin && git reset --hard origin/main` to sync with the latest history
   - Added [subtitle burning](#subtitle-burning) — use `--burn-subtitles` to hard-burn SRT subtitles into clip videos; optionally add `--subtitle-translation "Simplified Chinese"` to burn bilingual subtitles (requires ffmpeg with libass)
   - Switched OpenRouter default model from openrouter/free to stepfun/step-3.5-flash:free
-<details>
-<summary>Older updates</summary>
-
 - **2026-03-01**:
   - Streamlit interface now supports [background job processing and concurrent video processing](#concurrent-processing)
   - Added [speaker identification (Preview)](#speaker-identification) — use `--speaker-references` to automatically label speakers by name in transcripts for interviews, panels, and podcasts

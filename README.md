@@ -17,9 +17,9 @@
 
 ## 📢 最新动态
 
-- **2026-04-01**:
+- **2026-04-04**:
   - 新增 `custom_openai` 提供商，可在 Streamlit 或 CLI 中自定义 `LLM Model` 与 `LLM Base URL`，对接本地或自建 OpenAI 兼容接口
-  - Paraformer helper 默认改为仓库相对路径 `third_party/funasr-paraformer`，避免在配置里写入本机绝对路径
+  - 新增 [Paraformer 中文 ASR 支持](#paraformer-installation)，本地 ASR 会自动按语言路由，中文优先使用 Paraformer
 - **2026-03-30**:
   - 新增默认开启的剪辑边界修正，目标是让高光片段的开始和结束更自然，减少突兀截断
   - 在 Streamlit UI 中支持 Bilibili 多 P 视频一键创建任务、后台任务重试，以及重启后取消 pending 任务，感谢 [@xenoamess](https://github.com/xenoamess)
@@ -31,13 +31,13 @@
   - OpenClip 现已上架 skills.sh，可通过 `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` 在任意目录安装为 Agent Skill，并让 Agent 调用
 - **2026-03-08**:
   - 新增 `--user-intent` 参数 — 用自然语言告诉 AI 你在找什么（如 `--user-intent "关于 AI 风险的观点"`），LLM 在片段筛选和排名时会优先考虑相关内容
+<details>
+<summary>更早的更新</summary>
+
 - **2026-03-04**:
   - **Git 历史变更通知**：错误的减小 GitHub size 的尝试导致 Git 历史被重写，对现有用户造成不便，深感抱歉。已有克隆用户需运行 `git fetch origin && git reset --hard origin/main` 以同步最新历史
   - 新增[字幕烧录功能](#subtitle-burning) — 使用 `--burn-subtitles` 将 SRT 字幕直接烧录到剪辑视频中；可选 `--subtitle-translation "Simplified Chinese"` 同时烧录中英双语字幕（需要带 libass 的 ffmpeg）
   - OpenRouter 默认模型从 openrouter/free 切换至 stepfun/step-3.5-flash:free
-<details>
-<summary>更早的更新</summary>
-
 - **2026-03-01**:
   - Streamlit 界面支持[后台任务处理和并发处理多个视频](#concurrent-processing)
   - 新增[说话人识别功能（预览版）](#speaker-identification)— 使用 `--speaker-references` 为访谈/座谈/播客视频自动标注说话人姓名

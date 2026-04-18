@@ -205,3 +205,41 @@ def test_generate_preview_image_renders_subtitles(tmp_path):
     assert preview_path.exists()
     diff = ImageChops.difference(Image.open(baseline_path), Image.open(preview_path))
     assert diff.getbbox() is not None
+
+
+def test_preferred_subtitle_path_for_clip_prefers_whisper_sidecar(tmp_path):
+    mp4 = tmp_path / "rank_01_test.mp4"
+    mp4.write_bytes(b"video")
+    original_srt = tmp_path / "rank_01_test.srt"
+    original_srt.write_text("original", encoding="utf-8")
+    whisper_srt = tmp_path / "rank_01_test.whisper.srt"
+    whisper_srt.write_text("whisper", encoding="utf-8")
+
+    preferred = SubtitleBurner.preferred_subtitle_path_for_clip(mp4)
+
+    assert preferred == whisper_srt
+
+
+def test_burn_subtitles_for_clips_uses_whisper_sidecar_when_available(tmp_path, monkeypatch):
+    clips_dir = tmp_path / "clips"
+    output_dir = tmp_path / "out"
+    clips_dir.mkdir()
+    mp4 = clips_dir / "rank_01_test.mp4"
+    mp4.write_bytes(b"video")
+    (clips_dir / "rank_01_test.srt").write_text("original", encoding="utf-8")
+    whisper_srt = clips_dir / "rank_01_test.whisper.srt"
+    whisper_srt.write_text("whisper", encoding="utf-8")
+
+    burner = SubtitleBurner()
+    used_subtitles = []
+
+    def fake_process_clip(mp4_path, srt_path, output_path, subtitle_translation=None):
+        used_subtitles.append(Path(srt_path))
+        return True
+
+    monkeypatch.setattr(burner, "_process_clip", fake_process_clip)
+
+    result = burner.burn_subtitles_for_clips(str(clips_dir), str(output_dir))
+
+    assert result["success"] is True
+    assert used_subtitles == [whisper_srt]

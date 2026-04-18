@@ -513,7 +513,7 @@ class VideoOrchestrator:
                             if (source_clips_dir / name).exists()
                         ):
                             total += 1
-                            srt = mp4.with_suffix(".srt")
+                            srt = self.subtitle_burner.preferred_subtitle_path_for_clip(mp4)
                             ass_path = ass_tmp_dir / mp4.with_suffix(".ass").name
                             if srt.exists():
                                 self.subtitle_burner.prepare_ass_for_clip(

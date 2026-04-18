@@ -257,11 +257,11 @@ class SubtitleBurner:
         clip_filenames=None, clip_titles: dict = None,
     ) -> dict:
         """
-        Process MP4+SRT pairs in clips_dir and write subtitle-burned
+        Process MP4+subtitle pairs in clips_dir and write subtitle-burned
         versions to output_dir.
 
         Args:
-            clips_dir: Directory containing .mp4 and .srt files.
+            clips_dir: Directory containing .mp4 files and subtitle sidecars.
             output_dir: Directory to write burned clips to.
             subtitle_translation: If set (e.g. "Simplified Chinese"), translate
                 the SRT to that language and burn both tracks. Requires api_key.
@@ -288,12 +288,13 @@ class SubtitleBurner:
         processed_clips = []
         total = 0
         for mp4 in mp4_files:
-            srt = mp4.with_suffix(".srt")
+            srt = self.preferred_subtitle_path_for_clip(mp4)
             if not srt.exists():
                 logger.warning(f"No SRT for {mp4.name}, skipping subtitle burn")
                 continue
             total += 1
-            logger.info(f"  Burning subtitles: {mp4.name}")
+            subtitle_source = "whisper" if srt.name.endswith(".whisper.srt") else "original"
+            logger.info(f"  Burning subtitles: {mp4.name} ({subtitle_source})")
             ok = self._process_clip(
                 mp4, srt, output_dir / mp4.name, subtitle_translation
             )
@@ -311,6 +312,14 @@ class SubtitleBurner:
             "failed_clips": total - successful,
             "processed_clips": processed_clips,
         }
+
+    @staticmethod
+    def preferred_subtitle_path_for_clip(mp4: Path) -> Path:
+        """Prefer a Whisper sidecar when present, otherwise fall back to the default SRT."""
+        whisper_srt = mp4.with_suffix(".whisper.srt")
+        if whisper_srt.exists():
+            return whisper_srt
+        return mp4.with_suffix(".srt")
 
     def prepare_ass_for_clip(
         self, srt_path: Path, ass_path: Path, subtitle_translation: str = None

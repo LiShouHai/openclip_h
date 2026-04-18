@@ -5,6 +5,7 @@ Minimal agentic analysis coordinator for engaging-moments mode.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -38,6 +39,8 @@ class AnalysisCoordinator:
         verification_context_before_seconds: float = 60.0,
         verification_context_after_seconds: float = 60.0,
         verification_whisper_model: str = WHISPER_MODEL,
+        max_parallel_judge_batches: int = 2,
+        judge_batch_launch_stagger_seconds: float = 0.25,
     ):
         self.analyzer = analyzer
         self.overlap_threshold_seconds = overlap_threshold_seconds
@@ -50,6 +53,8 @@ class AnalysisCoordinator:
         self.verification_context_before_seconds = verification_context_before_seconds
         self.verification_context_after_seconds = verification_context_after_seconds
         self.verification_whisper_model = verification_whisper_model
+        self.max_parallel_judge_batches = max(1, int(max_parallel_judge_batches))
+        self.judge_batch_launch_stagger_seconds = max(0.0, float(judge_batch_launch_stagger_seconds))
 
     async def run(
         self,
@@ -139,7 +144,7 @@ class AnalysisCoordinator:
         if progress_callback:
             progress_callback("Verifying standalone quality...", 60)
 
-        final_top_moments, repair_pass_used, verification_report = self._verify_and_finalize(
+        final_top_moments, repair_pass_used, verification_report = await self._verify_and_finalize(
             top_moments,
             transcript_parts,
             progress_callback=progress_callback,
@@ -207,7 +212,7 @@ class AnalysisCoordinator:
             return 0
         return max(target * 2, target + 3)
 
-    def _verify_and_finalize(
+    async def _verify_and_finalize(
         self,
         aggregated: Dict[str, Any],
         transcript_parts: List[str],
@@ -230,10 +235,9 @@ class AnalysisCoordinator:
         )
         if progress_callback:
             progress_callback("Verifying standalone quality: judge batches...", 60)
-        self._apply_verification_batch(
+        await self._apply_judge_verification_batches(
             reviewed,
             batch_size=self.judge_batch_size,
-            mode="judge",
             progress_callback=progress_callback,
             progress_start=60,
             progress_end=64,
@@ -673,13 +677,7 @@ class AnalysisCoordinator:
                 end,
             )
             batch_started_at = perf_counter()
-            verification_results.extend(
-                self._run_llm_verification_batch(
-                    candidates[start:end],
-                    batch_size=batch_size,
-                    mode=mode,
-                )
-            )
+            verification_results.extend(self._run_single_verification_batch(candidates[start:end], mode=mode))
             logger.info(
                 "✅ %s batch %s/%s completed in %.1fs",
                 mode_label,
@@ -700,6 +698,82 @@ class AnalysisCoordinator:
                 )
         for candidate, llm_verification in zip(candidates, verification_results):
             self._apply_llm_verification_result(candidate, llm_verification, mode=mode)
+
+    async def _apply_judge_verification_batches(
+        self,
+        candidates: List[Dict[str, Any]],
+        batch_size: int,
+        progress_callback=None,
+        progress_start: Optional[float] = None,
+        progress_end: Optional[float] = None,
+    ) -> None:
+        if not candidates:
+            return
+
+        total_batches = max(1, (len(candidates) + batch_size - 1) // batch_size)
+        semaphore = asyncio.Semaphore(self.max_parallel_judge_batches)
+        completion_lock = asyncio.Lock()
+        completed_batches = 0
+        batch_results: List[Optional[List[Dict[str, Any]]]] = [None] * total_batches
+
+        async def run_batch(batch_index: int, batch_candidates: List[Dict[str, Any]]) -> None:
+            nonlocal completed_batches
+            start = batch_index * batch_size
+            end = start + len(batch_candidates)
+            logger.info(
+                "🧠 Judge batch %s/%s launched: candidates %s-%s",
+                batch_index + 1,
+                total_batches,
+                start + 1,
+                end,
+            )
+            async with semaphore:
+                batch_started_at = perf_counter()
+                results = await asyncio.to_thread(
+                    self._run_single_verification_batch,
+                    batch_candidates,
+                    "judge",
+                )
+                elapsed = perf_counter() - batch_started_at
+            logger.info(
+                "✅ Judge batch %s/%s completed in %.1fs",
+                batch_index + 1,
+                total_batches,
+                elapsed,
+            )
+            batch_results[batch_index] = results
+            if (
+                progress_callback
+                and progress_start is not None
+                and progress_end is not None
+                and total_batches > 0
+            ):
+                async with completion_lock:
+                    completed_batches += 1
+                    progress = progress_start + completed_batches * (progress_end - progress_start) / total_batches
+                    completed_now = completed_batches
+                progress_callback(
+                    f"Verifying standalone quality: judge batch {completed_now}/{total_batches}...",
+                    progress,
+                )
+
+        tasks = []
+        for batch_index in range(total_batches):
+            start = batch_index * batch_size
+            end = min(start + batch_size, len(candidates))
+            tasks.append(asyncio.create_task(run_batch(batch_index, candidates[start:end])))
+            if batch_index < total_batches - 1 and self.judge_batch_launch_stagger_seconds > 0:
+                await asyncio.sleep(self.judge_batch_launch_stagger_seconds)
+
+        await asyncio.gather(*tasks)
+
+        verification_results: List[Dict[str, Any]] = []
+        for batch_index, result in enumerate(batch_results):
+            if result is None:
+                raise RuntimeError(f"Judge batch {batch_index + 1} did not return results")
+            verification_results.extend(result)
+        for candidate, llm_verification in zip(candidates, verification_results):
+            self._apply_llm_verification_result(candidate, llm_verification, mode="judge")
 
     def _apply_llm_verification_result(
         self,
@@ -753,6 +827,16 @@ class AnalysisCoordinator:
             if getattr(self.analyzer, "user_intent", None):
                 candidate["intent_alignment_score"] = llm_verification["intent_alignment_score"]
             candidate["_passes_llm"] = llm_verification["keep"]
+            if not self._check_duration_deterministic(candidate):
+                candidate["verification_notes"] = self._append_note(
+                    candidate["verification_notes"],
+                    f"Rejected by deterministic validation: duration {duration_seconds}s is out of range.",
+                )
+            if not candidate.get("_coverage_entries") or not candidate.get("evidence_excerpt", "").strip():
+                candidate["verification_notes"] = self._append_note(
+                    candidate["verification_notes"],
+                    "Rejected by deterministic validation: transcript coverage is insufficient for this time range.",
+                )
 
     def _check_duration_deterministic(self, candidate: Dict[str, Any]) -> bool:
         duration_ok, _ = self._check_duration(candidate)
@@ -1051,50 +1135,60 @@ Candidate:
         results: List[Dict[str, Any]] = []
         for start in range(0, len(candidates), max(1, batch_size)):
             batch = candidates[start : start + max(1, batch_size)]
-            if len(batch) == 1:
-                candidate = batch[0]
-                results.append(
-                    self._run_llm_verification_single(
-                        candidate,
-                        candidate.get("_verification_context", {}),
-                        mode=mode,
-                    )
-                )
-                continue
-
-            batch_prompt = self._build_batched_verification_prompt(batch, mode=mode)
-            try:
-                response = self.analyzer.llm_client.simple_chat(
-                    batch_prompt,
-                    model=getattr(self.analyzer, "model", None),
-                )
-                parsed = self._extract_json_object(response)
-                parsed_results = parsed.get("results") if isinstance(parsed, dict) else parsed
-                if not isinstance(parsed_results, list) or len(parsed_results) != len(batch):
-                    raise ValueError("Batched verification response shape mismatch")
-                for item in parsed_results:
-                    results.append(
-                        {
-                            "keep": bool(item.get("keep", True)),
-                            "standalone_score": self._clamp_score(item.get("standalone_score", 0.5)),
-                            "intent_alignment_score": self._clamp_score(
-                                item.get("intent_alignment_score", 0.5)
-                            ),
-                            "reason": str(item.get("reason", "LLM verification completed.")).strip(),
-                            "repair_diagnosis": str(item.get("repair_diagnosis", "none")).strip() or "none",
-                        }
-                    )
-            except Exception as e:
-                logger.warning(f"Batched LLM verification failed, falling back to single verification: {e}")
-                for candidate in batch:
-                    results.append(
-                        self._run_llm_verification_single(
-                            candidate,
-                            candidate.get("_verification_context", {}),
-                            mode=mode,
-                        )
-                    )
+            results.extend(self._run_single_verification_batch(batch, mode=mode))
         return results
+
+    def _run_single_verification_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        mode: str,
+    ) -> List[Dict[str, Any]]:
+        if not batch:
+            return []
+        if len(batch) == 1:
+            candidate = batch[0]
+            return [
+                self._run_llm_verification_single(
+                    candidate,
+                    candidate.get("_verification_context", {}),
+                    mode=mode,
+                )
+            ]
+
+        batch_prompt = self._build_batched_verification_prompt(batch, mode=mode)
+        try:
+            response = self.analyzer.llm_client.simple_chat(
+                batch_prompt,
+                model=getattr(self.analyzer, "model", None),
+            )
+            parsed = self._extract_json_object(response)
+            parsed_results = parsed.get("results") if isinstance(parsed, dict) else parsed
+            if not isinstance(parsed_results, list) or len(parsed_results) != len(batch):
+                raise ValueError("Batched verification response shape mismatch")
+            results: List[Dict[str, Any]] = []
+            for item in parsed_results:
+                results.append(
+                    {
+                        "keep": bool(item.get("keep", True)),
+                        "standalone_score": self._clamp_score(item.get("standalone_score", 0.5)),
+                        "intent_alignment_score": self._clamp_score(
+                            item.get("intent_alignment_score", 0.5)
+                        ),
+                        "reason": str(item.get("reason", "LLM verification completed.")).strip(),
+                        "repair_diagnosis": str(item.get("repair_diagnosis", "none")).strip() or "none",
+                    }
+                )
+            return results
+        except Exception as e:
+            logger.warning(f"Batched LLM verification failed, falling back to single verification: {e}")
+            return [
+                self._run_llm_verification_single(
+                    candidate,
+                    candidate.get("_verification_context", {}),
+                    mode=mode,
+                )
+                for candidate in batch
+            ]
 
     def _build_batched_verification_prompt(
         self,

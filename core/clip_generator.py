@@ -113,8 +113,11 @@ class ClipGenerator:
                 }
                 srt_segments = None
                 subtitle_file = self._find_subtitle_file(video_part, subtitle_dir)
-                if subtitle_file and self.normalize_boundaries:
-                    srt_segments = self._parse_srt_file(subtitle_file)
+                normalization_source = "whisper" if moment.get("whisper_subtitle_source") else "original"
+                normalization_subtitle_file = moment.get("whisper_subtitle_source") or subtitle_file
+                logger.info(f"  📝 Boundary transcript source: {normalization_source}")
+                if normalization_subtitle_file and self.normalize_boundaries:
+                    srt_segments = self._parse_srt_file(normalization_subtitle_file)
 
                 if srt_segments:
                     effective_start_time, effective_end_time, normalization_details = self._normalize_clip_boundaries(
@@ -143,6 +146,19 @@ class ClipGenerator:
                         str(subtitle_path),
                         subtitle_dir
                     )
+                    whisper_subtitle_filename = None
+                    whisper_subtitle_source = moment.get("whisper_subtitle_source")
+                    if whisper_subtitle_source:
+                        whisper_subtitle_filename = f"rank_{rank:02d}_{safe_title}.whisper.srt"
+                        whisper_subtitle_path = self.output_dir / whisper_subtitle_filename
+                        whisper_subtitle_generated = self._extract_subtitle_from_file(
+                            whisper_subtitle_source,
+                            effective_start_time,
+                            effective_end_time,
+                            str(whisper_subtitle_path),
+                        )
+                        if not whisper_subtitle_generated:
+                            whisper_subtitle_filename = None
                     
                     effective_duration = max(
                         0.0,
@@ -155,6 +171,7 @@ class ClipGenerator:
                         'title': title,
                         'filename': output_filename,
                         'subtitle_filename': subtitle_filename if subtitle_generated else None,
+                        'whisper_subtitle_filename': whisper_subtitle_filename,
                         'duration': round(effective_duration or duration, 3),
                         'video_part': video_part,
                         'time_range': f"{effective_start_time} - {effective_end_time}",
@@ -168,6 +185,8 @@ class ClipGenerator:
                         logger.info(f"✓ Subtitle: {subtitle_filename}")
                     else:
                         logger.info(f"⚠ No subtitle generated for this clip")
+                    if whisper_subtitle_filename:
+                        logger.info(f"✓ Whisper subtitle: {whisper_subtitle_filename}")
                 else:
                     logger.error(f"✗ Failed: {output_filename}")
             
@@ -292,53 +311,61 @@ class ClipGenerator:
             if not subtitle_file:
                 logger.info(f"⚠ No subtitle file found for {video_part}")
                 return False
-            
-            # Parse subtitle file
-            segments = self._parse_srt_file(subtitle_file)
-            if not segments:
-                logger.info(f"⚠ No subtitle segments found in {subtitle_file}")
-                return False
-            
-            # Convert clip time range to seconds (supports both HH:MM:SS and HH:MM:SS.mmm)
-            clip_start = self._parse_time_flexible(start_time)
-            clip_end = self._parse_time_flexible(end_time)
-            
-            # Filter segments that overlap with clip time range
-            clip_segments = []
-            for seg in segments:
-                seg_start = self._time_to_seconds_srt(seg['start_time'])
-                seg_end = self._time_to_seconds_srt(seg['end_time'])
-                
-                # Check if segment overlaps with clip time range
-                if seg_end > clip_start and seg_start < clip_end:
-                    # Adjust segment timing to start from 0 for the clip
-                    new_start = max(0.0, seg_start - clip_start)
-                    new_end = max(new_start + 0.1, seg_end - clip_start)
-                    
-                    clip_segments.append({
-                        'index': len(clip_segments) + 1,
-                        'start_time': self._seconds_to_time_srt(new_start),
-                        'end_time': self._seconds_to_time_srt(new_end),
-                        'text': seg['text']
-                    })
-            
-            if not clip_segments:
-                logger.info(f"⚠ No subtitle segments overlap with clip time range")
-                return False
-            
-            # Write to file
-            with open(output_path, 'w', encoding='utf-8') as f:
-                for seg in clip_segments:
-                    f.write(f"{seg['index']}\n")
-                    f.write(f"{seg['start_time']} --> {seg['end_time']}\n")
-                    f.write(f"{seg['text']}\n\n")
-            
-            logger.info(f"✓ Generated subtitle file with {len(clip_segments)} segments")
-            return True
+            return self._extract_subtitle_from_file(
+                subtitle_file,
+                start_time,
+                end_time,
+                output_path,
+            )
             
         except Exception as e:
             logger.warning(f"⚠ Error extracting subtitle for clip: {e}")
             return False
+
+    def _extract_subtitle_from_file(
+        self,
+        subtitle_file: str,
+        start_time: str,
+        end_time: str,
+        output_path: str,
+    ) -> bool:
+        """Extract subtitle segments from an explicit SRT file for a clip's time range."""
+        segments = self._parse_srt_file(subtitle_file)
+        if not segments:
+            logger.info(f"⚠ No subtitle segments found in {subtitle_file}")
+            return False
+
+        clip_start = self._parse_time_flexible(start_time)
+        clip_end = self._parse_time_flexible(end_time)
+
+        clip_segments = []
+        for seg in segments:
+            seg_start = self._time_to_seconds_srt(seg['start_time'])
+            seg_end = self._time_to_seconds_srt(seg['end_time'])
+
+            if seg_end > clip_start and seg_start < clip_end:
+                new_start = max(0.0, seg_start - clip_start)
+                new_end = max(new_start + 0.1, seg_end - clip_start)
+
+                clip_segments.append({
+                    'index': len(clip_segments) + 1,
+                    'start_time': self._seconds_to_time_srt(new_start),
+                    'end_time': self._seconds_to_time_srt(new_end),
+                    'text': seg['text']
+                })
+
+        if not clip_segments:
+            logger.info(f"⚠ No subtitle segments overlap with clip time range")
+            return False
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            for seg in clip_segments:
+                f.write(f"{seg['index']}\n")
+                f.write(f"{seg['start_time']} --> {seg['end_time']}\n")
+                f.write(f"{seg['text']}\n\n")
+
+        logger.info(f"✓ Generated subtitle file with {len(clip_segments)} segments")
+        return True
     
     def _time_to_seconds(self, time_str: str) -> int:
         """Convert MM:SS or HH:MM:SS to seconds"""
@@ -615,11 +642,21 @@ class ClipGenerator:
             f.write("# 🔥 Top Engaging Moments - Video Clips\n\n")
             f.write(f"**Total Clips**: {len(clips_info)}\n\n")
             
-            if 'analysis_summary' in data:
+            analysis_summary = data.get('analysis_summary')
+            if isinstance(analysis_summary, dict):
                 f.write("## 📊 Analysis Summary\n")
-                f.write(f"**Highest Engagement Themes**: {', '.join(data['analysis_summary']['highest_engagement_themes'])}\n")
-                f.write(f"**Total Engaging Content Time**: {data['analysis_summary']['total_engaging_content_time']}\n")
-                f.write(f"**Recommendation**: {data['analysis_summary']['recommendation']}\n\n")
+                themes = analysis_summary.get('highest_engagement_themes') or []
+                total_time = analysis_summary.get('total_engaging_content_time')
+                recommendation = analysis_summary.get('recommendation')
+
+                if themes:
+                    f.write(f"**Highest Engagement Themes**: {', '.join(themes)}\n")
+                if total_time:
+                    f.write(f"**Total Engaging Content Time**: {total_time}\n")
+                if recommendation:
+                    f.write(f"**Recommendation**: {recommendation}\n")
+                if themes or total_time or recommendation:
+                    f.write("\n")
             
             f.write("## 🎬 Generated Clips\n\n")
             f.write("| Rank | Title | Video File | Subtitle File | Duration | Engagement |\n")

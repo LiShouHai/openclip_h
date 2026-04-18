@@ -17,6 +17,8 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## 📢 News
 
+- **2026-04-19**:
+  - Added `--deep-optimize` / Streamlit “Deep Optimize” mode: after candidate highlight aggregation, OpenClip runs extra AI review, boundary repair, and re-review steps to improve clip boundaries and standalone quality. See [With `--deep-optimize`](#with---deep-optimize)
 - **2026-04-04**:
   - Added a `custom_openai` provider with configurable `LLM Model` and `LLM Base URL` in both Streamlit and CLI, so OpenClip can target local or self-hosted OpenAI-compatible endpoints
   - Added [Paraformer support for Chinese ASR](#paraformer-installation), with local ASR automatically routing Chinese audio to Paraformer
@@ -401,6 +403,7 @@ Remote video downloads sometimes hit login checks, bot protection, or platform r
 | `--force-whisper` | Force local ASR transcription (ignore platform subtitles); English uses Whisper and Chinese uses Paraformer | Off |
 | `--use-background` | Use background info for analysis | Off |
 | `--normalize-boundaries` / `--no-normalize-boundaries` | Align clip starts and ends to nearby subtitle boundaries during clip generation; prefers sentence boundaries first and subtitle-gap pauses second. Enabled by default, disable with `--no-normalize-boundaries` | On |
+| `--deep-optimize` | Run the deeper clip review and refinement workflow to improve boundaries and standalone quality, at the cost of slower processing. See [With `--deep-optimize`](#with---deep-optimize) | Off |
 | `--user-intent` | Natural language description of what you're looking for (e.g. `"moments about AI risks"`); steers LLM clip selection and ranking | None |
 | `--max-clips` | Maximum number of highlight clips | `5` |
 | `--title-style` | Title artistic style (see list below) | `fire_flame` |
@@ -523,12 +526,23 @@ Edit prompt templates in `prompts/`:
 - `engaging_moments_part_requirement.md` - Analysis criteria for each part
 - `engaging_moments_agg_requirement.md` - Aggregation criteria for top moments
 
-## 📎 Others
+### Steer Selection with Natural Language
 
-<details>
-<summary>🔧 Workflow</summary>
+You can also use `--user-intent` to tell OpenClip what kinds of moments to prioritize, for example:
 
-```
+- `moments about AI risks`
+- `the most controversial exchanges`
+- `high-energy moments suited for short-form clips`
+
+This does not hard-filter the output to one topic, but it does influence candidate prioritization and final ranking.
+
+## 🔧 Workflow
+
+OpenClip first finds candidate highlight clips, then generates subtitles, clips, covers, and optional post-processing outputs. The default mode is faster; turning on `--deep-optimize` adds extra AI review and boundary refinement to trade more time and tokens for better clip quality.
+
+### Default flow
+
+```text
 Input (URL or File)
     ↓
 Download/Validate Video
@@ -539,7 +553,7 @@ Check Duration → Split if >20 min
     ↓
 AI Analysis (per part)
     ↓
-Aggregate Top 5 Moments
+Aggregate Candidate Highlights
     ↓
 Generate Clips
     ↓
@@ -549,10 +563,46 @@ Post-processing (optional)
     ↓
 Generate Cover Images
     ↓
-Output Ready!
+Output Ready
 ```
 
-</details>
+### With `--deep-optimize`
+
+After the candidate highlight aggregation step, OpenClip adds an extra AI review stage:
+
+- checks whether each candidate works as a standalone clip
+- attempts boundary repair when needed
+- re-reviews repaired clips
+- then performs final selection and export
+
+```text
+Default flow
+Aggregate Candidate Highlights
+   ↓
+Generate Clips
+
+With --deep-optimize
+Aggregate Candidate Highlights
+   ↓
+judge (standalone review)
+   ↓
+repair (boundary repair when needed)
+   ↓
+rejudge (post-repair review)
+   ↓
+Generate Clips
+```
+
+This usually produces clips with cleaner boundaries and more complete context.
+
+### Tradeoffs
+
+- higher latency and higher token usage
+- for a video around 60 minutes long, the extra latency is typically about **3 to 6 minutes**; the token increase depends on how many candidate clips are reviewed and whether repair and re-review are triggered
+- turn it on when clip quality matters more than speed and cost
+- leave it off when throughput and cost matter more
+
+## 📎 Others
 
 <details>
 <summary>🐛 Troubleshooting</summary>

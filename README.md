@@ -17,6 +17,8 @@
 
 ## 📢 最新动态
 
+- **2026-04-19**:
+  - 新增 `--deep-optimize` / Streamlit「深度优化」模式：在候选片段汇总后增加 AI 复审、边界修复与复审流程，以提升片段边界与独立成段质量，详见[开启 `--deep-optimize` 时](#开启---deep-optimize-时)
 - **2026-04-04**:
   - 新增 `custom_openai` 提供商，可在 Streamlit 或 CLI 中自定义 `LLM Model` 与 `LLM Base URL`，对接本地或自建 OpenAI 兼容接口
   - 新增 [Paraformer 中文 ASR 支持](#paraformer-installation)，本地 ASR 会自动按语言路由，中文优先使用 Paraformer
@@ -401,6 +403,7 @@ uv run python video_orchestrator.py \
 | `--force-whisper` | 强制使用本地 ASR 转录（忽略平台字幕）；英文使用 Whisper，中文使用 Paraformer | 关 |
 | `--use-background` | 使用背景信息辅助分析 | 关 |
 | `--normalize-boundaries` / `--no-normalize-boundaries` | 剪辑生成时将开始/结束时间对齐到附近字幕边界；优先句子边界，其次字幕间停顿。默认开启，可用 `--no-normalize-boundaries` 关闭 | 开 |
+| `--deep-optimize` | 启用更深入的片段复审与优化流程，提升片段边界和独立成段质量，但处理更慢。详见[开启 `--deep-optimize` 时](#开启---deep-optimize-时) | 关 |
 | `--user-intent` | 用自然语言描述关注重点（如 `"关于 AI 风险的观点"`），引导 AI 优先选取相关片段 | 无 |
 | `--max-clips` | 最大精彩片段数量 | `5` |
 | `--title-style` | Banner 标题艺术风格（见下方列表） | `fire_flame` |
@@ -523,23 +526,34 @@ uv run python video_orchestrator.py --use-background "VIDEO_URL"
 - `engaging_moments_part_requirement.md` - 每个片段的分析标准
 - `engaging_moments_agg_requirement.md` - 顶级时刻的汇总标准
 
-## 📎 其他
+### 用自然语言指定关注点
 
-<details>
-<summary>🔧 工作流程</summary>
+你也可以通过 `--user-intent` 告诉 OpenClip 你更想要哪类片段，例如：
 
-```
+- `关于 AI 风险的观点`
+- `最有争议的争论片段`
+- `适合短视频传播的高能时刻`
+
+这不会强制只输出某一类内容，但会影响候选片段的优先级与最终排序。
+
+## 🔧 工作流程
+
+OpenClip 会先找到候选高光片段，再生成字幕、剪辑、封面和可选后期处理。默认模式更快；开启 `--deep-optimize` 后，会增加额外的 AI 复审与边界优化流程，以换取更高的片段质量。
+
+### 默认流程
+
+```text
 输入（URL 或文件）
     ↓
 下载/验证视频
     ↓
 提取/生成转录
     ↓
-检查时长 → 如果 >20分钟则分割
+检查时长 → 如果 >20 分钟则分割
     ↓
 AI 分析（每个片段）
     ↓
-汇总前5个时刻
+汇总候选高光
     ↓
 生成剪辑
     ↓
@@ -549,10 +563,46 @@ AI 分析（每个片段）
     ↓
 生成封面图片
     ↓
-输出完成！
+输出完成
 ```
 
-</details>
+### 开启 `--deep-optimize` 时
+
+在默认流程的“汇总候选高光”之后，会增加额外的 AI 复审阶段：
+
+- 判断每个候选片段是否能独立成段
+- 必要时尝试修复片段边界
+- 对修复后的片段再次复审
+- 再进入最终片段筛选与导出
+
+```text
+默认流程
+汇总候选高光
+   ↓
+生成剪辑
+
+开启 --deep-optimize 后
+汇总候选高光
+   ↓
+judge（独立成段复审）
+   ↓
+repair（必要时修复边界）
+   ↓
+rejudge（修复后复审）
+   ↓
+生成剪辑
+```
+
+这样通常能得到边界更自然、上下文更完整、更适合直接传播的片段。
+
+### 代价与适用场景
+
+- 代价是处理时间和 token 用量都会增加
+- 以 60 分钟左右的视频为例，额外耗时通常约 **3 到 6 分钟**；token 用量的增幅取决于候选片段数量，以及是否触发修复与复审
+- 如果更看重片段质量，建议开启
+- 如果更看重速度和成本，可以保持关闭
+
+## 📎 其他
 
 <details>
 <summary>🐛 故障排除</summary>

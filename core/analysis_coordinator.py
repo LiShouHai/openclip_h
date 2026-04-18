@@ -41,6 +41,8 @@ class AnalysisCoordinator:
         verification_whisper_model: str = WHISPER_MODEL,
         max_parallel_judge_batches: int = 2,
         judge_batch_launch_stagger_seconds: float = 0.25,
+        max_parallel_repairs: int = 2,
+        repair_launch_stagger_seconds: float = 0.25,
     ):
         self.analyzer = analyzer
         self.overlap_threshold_seconds = overlap_threshold_seconds
@@ -55,6 +57,8 @@ class AnalysisCoordinator:
         self.verification_whisper_model = verification_whisper_model
         self.max_parallel_judge_batches = max(1, int(max_parallel_judge_batches))
         self.judge_batch_launch_stagger_seconds = max(0.0, float(judge_batch_launch_stagger_seconds))
+        self.max_parallel_repairs = max(1, int(max_parallel_repairs))
+        self.repair_launch_stagger_seconds = max(0.0, float(repair_launch_stagger_seconds))
 
     async def run(
         self,
@@ -235,9 +239,10 @@ class AnalysisCoordinator:
         )
         if progress_callback:
             progress_callback("Verifying standalone quality: judge batches...", 60)
-        await self._apply_judge_verification_batches(
+        await self._apply_parallel_verification_batches(
             reviewed,
             batch_size=self.judge_batch_size,
+            mode="judge",
             progress_callback=progress_callback,
             progress_start=60,
             progress_end=64,
@@ -267,27 +272,22 @@ class AnalysisCoordinator:
 
         target = min(getattr(self.analyzer, "max_clips", len(raw_candidates)), len(raw_candidates))
         repair_pass_used = bool(rejected_for_repair)
-        repaired_candidates: List[Dict[str, Any]] = []
-        total_repairs = len(rejected_for_repair)
-        for repair_index, candidate in enumerate(rejected_for_repair, start=1):
-            if progress_callback and total_repairs:
-                repair_progress = 64 + (repair_index - 1) * 4 / total_repairs
-                progress_callback(
-                    f"Verifying standalone quality: repair {repair_index}/{total_repairs}...",
-                    repair_progress,
+        repaired_candidates, failed_repairs = await self._apply_parallel_repairs(
+            rejected_for_repair,
+            transcript_map,
+            progress_callback=progress_callback,
+            progress_start=64,
+            progress_end=68,
+        )
+        for candidate in failed_repairs:
+            if candidate.get("_repair_planner_attempted"):
+                candidate["verification_notes"] = (
+                    candidate.get("_planner_reason")
+                    or candidate.get("verification_notes", "")
                 )
-            repaired = self._attempt_boundary_repair(candidate, transcript_map)
-            if repaired is None:
-                if candidate.get("_repair_planner_attempted"):
-                    candidate["verification_notes"] = (
-                        candidate.get("_planner_reason")
-                        or candidate.get("verification_notes", "")
-                    )
-                    verification_clips.append(
-                        self._build_verification_clip_entry(candidate, "rejected")
-                    )
-                continue
-            repaired_candidates.append(repaired)
+                verification_clips.append(
+                    self._build_verification_clip_entry(candidate, "rejected")
+                )
 
         rejudge_batches = (
             max(1, (len(repaired_candidates) + self.rejudge_batch_size - 1) // self.rejudge_batch_size)
@@ -303,7 +303,7 @@ class AnalysisCoordinator:
             )
             if progress_callback:
                 progress_callback("Verifying standalone quality: rejudge batches...", 68)
-        self._apply_verification_batch(
+        await self._apply_parallel_verification_batches(
             repaired_candidates,
             batch_size=self.rejudge_batch_size,
             mode="rejudge",
@@ -650,7 +650,7 @@ class AnalysisCoordinator:
             )
         output_path.write_text("\n".join(lines), encoding="utf-8")
 
-    def _apply_verification_batch(
+    async def _apply_parallel_verification_batches(
         self,
         candidates: List[Dict[str, Any]],
         batch_size: int,
@@ -663,65 +663,19 @@ class AnalysisCoordinator:
             return
 
         total_batches = max(1, (len(candidates) + batch_size - 1) // batch_size)
-        verification_results: List[Dict[str, Any]] = []
-        mode_label = "Judge" if mode == "judge" else "Rejudge"
-        for batch_index in range(total_batches):
-            start = batch_index * batch_size
-            end = min(start + batch_size, len(candidates))
-            logger.info(
-                "🧠 %s batch %s/%s: candidates %s-%s",
-                mode_label,
-                batch_index + 1,
-                total_batches,
-                start + 1,
-                end,
-            )
-            batch_started_at = perf_counter()
-            verification_results.extend(self._run_single_verification_batch(candidates[start:end], mode=mode))
-            logger.info(
-                "✅ %s batch %s/%s completed in %.1fs",
-                mode_label,
-                batch_index + 1,
-                total_batches,
-                perf_counter() - batch_started_at,
-            )
-            if (
-                progress_callback
-                and progress_start is not None
-                and progress_end is not None
-                and total_batches > 0
-            ):
-                progress = progress_start + (batch_index + 1) * (progress_end - progress_start) / total_batches
-                progress_callback(
-                    f"Verifying standalone quality: {mode_label.lower()} batch {batch_index + 1}/{total_batches}...",
-                    progress,
-                )
-        for candidate, llm_verification in zip(candidates, verification_results):
-            self._apply_llm_verification_result(candidate, llm_verification, mode=mode)
-
-    async def _apply_judge_verification_batches(
-        self,
-        candidates: List[Dict[str, Any]],
-        batch_size: int,
-        progress_callback=None,
-        progress_start: Optional[float] = None,
-        progress_end: Optional[float] = None,
-    ) -> None:
-        if not candidates:
-            return
-
-        total_batches = max(1, (len(candidates) + batch_size - 1) // batch_size)
         semaphore = asyncio.Semaphore(self.max_parallel_judge_batches)
         completion_lock = asyncio.Lock()
         completed_batches = 0
         batch_results: List[Optional[List[Dict[str, Any]]]] = [None] * total_batches
+        mode_label = "Judge" if mode == "judge" else "Rejudge"
 
         async def run_batch(batch_index: int, batch_candidates: List[Dict[str, Any]]) -> None:
             nonlocal completed_batches
             start = batch_index * batch_size
             end = start + len(batch_candidates)
             logger.info(
-                "🧠 Judge batch %s/%s launched: candidates %s-%s",
+                "🧠 %s batch %s/%s launched: candidates %s-%s",
+                mode_label,
                 batch_index + 1,
                 total_batches,
                 start + 1,
@@ -732,11 +686,12 @@ class AnalysisCoordinator:
                 results = await asyncio.to_thread(
                     self._run_single_verification_batch,
                     batch_candidates,
-                    "judge",
+                    mode,
                 )
                 elapsed = perf_counter() - batch_started_at
             logger.info(
-                "✅ Judge batch %s/%s completed in %.1fs",
+                "✅ %s batch %s/%s completed in %.1fs",
+                mode_label,
                 batch_index + 1,
                 total_batches,
                 elapsed,
@@ -753,7 +708,7 @@ class AnalysisCoordinator:
                     progress = progress_start + completed_batches * (progress_end - progress_start) / total_batches
                     completed_now = completed_batches
                 progress_callback(
-                    f"Verifying standalone quality: judge batch {completed_now}/{total_batches}...",
+                    f"Verifying standalone quality: {mode_label.lower()} batch {completed_now}/{total_batches}...",
                     progress,
                 )
 
@@ -770,10 +725,86 @@ class AnalysisCoordinator:
         verification_results: List[Dict[str, Any]] = []
         for batch_index, result in enumerate(batch_results):
             if result is None:
-                raise RuntimeError(f"Judge batch {batch_index + 1} did not return results")
+                raise RuntimeError(f"{mode_label} batch {batch_index + 1} did not return results")
             verification_results.extend(result)
         for candidate, llm_verification in zip(candidates, verification_results):
-            self._apply_llm_verification_result(candidate, llm_verification, mode="judge")
+            self._apply_llm_verification_result(candidate, llm_verification, mode=mode)
+
+    async def _apply_parallel_repairs(
+        self,
+        candidates: List[Dict[str, Any]],
+        transcript_map: Dict[str, str],
+        progress_callback=None,
+        progress_start: Optional[float] = None,
+        progress_end: Optional[float] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        if not candidates:
+            return [], []
+
+        total_repairs = len(candidates)
+        semaphore = asyncio.Semaphore(self.max_parallel_repairs)
+        completion_lock = asyncio.Lock()
+        completed_repairs = 0
+        repair_results: List[Optional[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]]] = [None] * total_repairs
+
+        async def run_repair(repair_index: int, candidate: Dict[str, Any]) -> None:
+            nonlocal completed_repairs
+            logger.info(
+                "🛠️ Repair task %s/%s launched for '%s'",
+                repair_index + 1,
+                total_repairs,
+                candidate.get("title", "Untitled clip"),
+            )
+            async with semaphore:
+                repair_started_at = perf_counter()
+                repaired = await asyncio.to_thread(
+                    self._attempt_boundary_repair,
+                    candidate,
+                    transcript_map,
+                )
+                elapsed = perf_counter() - repair_started_at
+            logger.info(
+                "✅ Repair task %s/%s completed in %.1fs for '%s'",
+                repair_index + 1,
+                total_repairs,
+                elapsed,
+                candidate.get("title", "Untitled clip"),
+            )
+            repair_results[repair_index] = (candidate, repaired)
+            if (
+                progress_callback
+                and progress_start is not None
+                and progress_end is not None
+                and total_repairs > 0
+            ):
+                async with completion_lock:
+                    completed_repairs += 1
+                    progress = progress_start + completed_repairs * (progress_end - progress_start) / total_repairs
+                    completed_now = completed_repairs
+                progress_callback(
+                    f"Verifying standalone quality: repair {completed_now}/{total_repairs}...",
+                    progress,
+                )
+
+        tasks = []
+        for repair_index, candidate in enumerate(candidates):
+            tasks.append(asyncio.create_task(run_repair(repair_index, candidate)))
+            if repair_index < total_repairs - 1 and self.repair_launch_stagger_seconds > 0:
+                await asyncio.sleep(self.repair_launch_stagger_seconds)
+
+        await asyncio.gather(*tasks)
+
+        repaired_candidates: List[Dict[str, Any]] = []
+        failed_candidates: List[Dict[str, Any]] = []
+        for repair_index, result in enumerate(repair_results):
+            if result is None:
+                raise RuntimeError(f"Repair task {repair_index + 1} did not return a result")
+            candidate, repaired = result
+            if repaired is None:
+                failed_candidates.append(candidate)
+            else:
+                repaired_candidates.append(repaired)
+        return repaired_candidates, failed_candidates
 
     def _apply_llm_verification_result(
         self,

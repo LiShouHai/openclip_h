@@ -1262,8 +1262,8 @@ Note: Set the API key environment variable for your selected provider when requi
                        help='Free-text description of what you are looking for '
                             '(e.g. "moments about AI risks"). Steers LLM clip selection '
                             'and ranking toward this focus.')
-    parser.add_argument('--agentic-analysis', action='store_true',
-                       help='Enable the experimental bounded agentic analysis loop for engaging moments')
+    parser.add_argument('--deep-optimize', dest='agentic_analysis', action='store_true',
+                       help='Run the deeper clip review and refinement workflow for better standalone clip quality')
     parser.add_argument('--normalize-boundaries', dest='normalize_boundaries', action='store_true',
                        help='Normalize both clip start and end times to nearby subtitle boundaries')
     parser.add_argument('--no-normalize-boundaries', dest='normalize_boundaries', action='store_false',

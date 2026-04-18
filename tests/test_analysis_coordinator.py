@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from core.analysis_coordinator import AnalysisCoordinator
@@ -71,102 +72,37 @@ class _FakeAnalyzer:
             "total_moments": 1,
         }
 
-    async def aggregate_top_moments(self, _highlights_files, _output_dir):
-        moments = [
-                {
-                    "rank": 1,
-                    "title": "Standalone clip",
-                    "summary": "Explains the point clearly.",
-                    "engagement_details": {"engagement_level": "high"},
-                    "why_engaging": "Clear and useful.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:00:00",
-                        "end_time": "00:00:45",
-                        "duration": "45s",
-                    },
-                },
-                {
-                    "rank": 2,
-                    "title": "Needs context",
-                    "summary": "Starts in the middle of an answer.",
-                    "engagement_details": {"engagement_level": "medium"},
-                    "why_engaging": "Interesting but abrupt.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:01:00",
-                        "end_time": "00:01:45",
-                        "duration": "45s",
-                    },
-                },
-                {
-                    "rank": 3,
-                    "title": "Backup clip",
-                    "summary": "Another candidate that can survive broader pre-verification shortlisting.",
-                    "engagement_details": {"engagement_level": "medium"},
-                    "why_engaging": "Useful as backup coverage.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:00:15",
-                        "end_time": "00:00:45",
-                        "duration": "30s",
-                    },
-                },
-            ]
-        limited = moments[: self.aggregate_candidates]
-        return {
-            "top_engaging_moments": limited[: self.max_clips],
-            "total_moments": min(len(limited), self.max_clips),
-        }
-
     def build_pre_verify_pool(self, _highlights_files, pool_size):
         moments = [
-                {
-                    "rank": 1,
-                    "title": "Standalone clip",
-                    "summary": "Explains the point clearly.",
-                    "engagement_details": {"engagement_level": "high"},
-                    "why_engaging": "Clear and useful.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:00:00",
-                        "end_time": "00:00:45",
-                        "duration": "45s",
-                    },
-                },
-                {
-                    "rank": 2,
-                    "title": "Needs context",
-                    "summary": "Starts in the middle of an answer.",
-                    "engagement_details": {"engagement_level": "medium"},
-                    "why_engaging": "Interesting but abrupt.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:01:00",
-                        "end_time": "00:01:45",
-                        "duration": "45s",
-                    },
-                },
-                {
-                    "rank": 3,
-                    "title": "Backup clip",
-                    "summary": "Another candidate that can survive broader pre-verification shortlisting.",
-                    "engagement_details": {"engagement_level": "medium"},
-                    "why_engaging": "Useful as backup coverage.",
-                    "tags": ["insight"],
-                    "timing": {
-                        "video_part": "part01",
-                        "start_time": "00:00:15",
-                        "end_time": "00:00:45",
-                        "duration": "30s",
-                    },
-                },
-            ]
+            _make_pre_verify_candidate(
+                rank=1,
+                title="Standalone clip",
+                summary="Explains the point clearly.",
+                why_engaging="Clear and useful.",
+                level="high",
+                start_time="00:00:00",
+                end_time="00:00:45",
+            ),
+            _make_pre_verify_candidate(
+                rank=2,
+                title="Needs context",
+                summary="Starts in the middle of an answer.",
+                why_engaging="Interesting but abrupt.",
+                level="medium",
+                start_time="00:01:00",
+                end_time="00:01:45",
+            ),
+            _make_pre_verify_candidate(
+                rank=3,
+                title="Backup clip",
+                summary="Another candidate that can survive broader pre-verification shortlisting.",
+                why_engaging="Useful as backup coverage.",
+                level="medium",
+                start_time="00:00:15",
+                end_time="00:00:45",
+                duration="30s",
+            ),
+        ]
         pool = moments[: self.aggregate_candidates][:pool_size]
         return {
             "top_engaging_moments": pool,
@@ -235,6 +171,57 @@ def _write_transcript(path: Path):
         ),
         encoding="utf-8",
     )
+
+
+def _make_pre_verify_candidate(
+    *,
+    rank: int,
+    title: str,
+    summary: str,
+    why_engaging: str,
+    level: str,
+    start_time: str,
+    end_time: str,
+    duration: str = "45s",
+    video_part: str = "part01",
+):
+    return {
+        "rank": rank,
+        "title": title,
+        "summary": summary,
+        "engagement_details": {"engagement_level": level},
+        "why_engaging": why_engaging,
+        "tags": ["insight"],
+        "timing": {
+            "video_part": video_part,
+            "start_time": start_time,
+            "end_time": end_time,
+            "duration": duration,
+        },
+    }
+
+
+def _make_parallel_candidate(
+    title: str,
+    *,
+    mode: str = "judge",
+    video_part: str = "part01",
+    start_time: str = "00:00:00",
+    end_time: str = "00:00:45",
+):
+    candidate = {
+        "title": title,
+        "_verification_context": {},
+        "_passes_deterministic": True,
+        "timing": {
+            "video_part": video_part,
+            "start_time": start_time,
+            "end_time": end_time,
+        },
+    }
+    if mode == "rejudge":
+        candidate["verification_notes"] = ""
+    return candidate
 
 
 def test_agentic_analysis_verifies_standalone_and_writes_artifacts(tmp_path):
@@ -648,7 +635,7 @@ def test_repaired_clip_can_overlap_when_it_adds_substantial_new_material(tmp_pat
     )
 
 
-def test_repair_retires_original_candidate_even_if_repair_fails(tmp_path):
+def test_repair_failure_does_not_reintroduce_original_candidate(tmp_path):
     transcript_path = tmp_path / "part01.srt"
     _write_transcript(transcript_path)
     analyzer = _FakeAnalyzer(
@@ -793,3 +780,380 @@ def test_verification_report_includes_transcript_source_fields(tmp_path):
     assert entry["verification_transcript_source"] == "whisper"
     assert entry["verification_transcript_reason"] == "overlap ratio 0.50 across 2 adjacent subtitle pairs"
     assert entry["verification_transcript_path"] == "/tmp/example.absolute.srt"
+
+
+def test_parallel_verification_batches_preserve_candidate_order_for_judge(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        judge_batch_size=2,
+        max_parallel_judge_batches=2,
+        judge_batch_launch_stagger_seconds=0.0,
+    )
+    candidates = [
+        _make_parallel_candidate("A"),
+        _make_parallel_candidate("B"),
+        _make_parallel_candidate("C"),
+        _make_parallel_candidate("D"),
+    ]
+
+    def fake_run_single_verification_batch(batch, mode):
+        assert mode == "judge"
+        titles = [candidate["title"] for candidate in batch]
+        if titles == ["A", "B"]:
+            time.sleep(0.15)
+        else:
+            time.sleep(0.01)
+        return [
+            {
+                "keep": True,
+                "standalone_score": float(ord(title) - 64),
+                "intent_alignment_score": 0.5,
+                "reason": f"reason-{title}",
+                "repair_diagnosis": "none",
+            }
+            for title in titles
+        ]
+
+    coordinator._run_single_verification_batch = fake_run_single_verification_batch
+
+    asyncio.run(
+        coordinator._apply_parallel_verification_batches(
+            candidates,
+            batch_size=2,
+            mode="judge",
+        )
+    )
+
+    assert [candidate["_judge_reason"] for candidate in candidates] == [
+        "reason-A",
+        "reason-B",
+        "reason-C",
+        "reason-D",
+    ]
+
+
+def test_parallel_verification_progress_reaches_expected_range_for_judge(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        judge_batch_size=2,
+        max_parallel_judge_batches=2,
+        judge_batch_launch_stagger_seconds=0.0,
+    )
+    candidates = [
+        _make_parallel_candidate("A"),
+        _make_parallel_candidate("B"),
+        _make_parallel_candidate("C"),
+        _make_parallel_candidate("D"),
+    ]
+    progress_events = []
+
+    def fake_run_single_verification_batch(batch, mode):
+        return [
+            {
+                "keep": True,
+                "standalone_score": 0.8,
+                "intent_alignment_score": 0.5,
+                "reason": candidate["title"],
+                "repair_diagnosis": "none",
+            }
+            for candidate in batch
+        ]
+
+    coordinator._run_single_verification_batch = fake_run_single_verification_batch
+
+    asyncio.run(
+        coordinator._apply_parallel_verification_batches(
+            candidates,
+            batch_size=2,
+            mode="judge",
+            progress_callback=lambda status, progress: progress_events.append((status, progress)),
+            progress_start=60,
+            progress_end=64,
+        )
+    )
+
+    assert len(progress_events) == 2
+    assert progress_events[-1][1] == 64
+    assert all("judge batch" in status for status, _ in progress_events)
+
+
+def test_single_batch_verification_falls_back_to_single_calls_on_shape_mismatch(tmp_path):
+    transcript_path = tmp_path / "part01.srt"
+    _write_transcript(transcript_path)
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(analyzer)
+    candidates = [
+        {
+            "title": "A",
+            "timing": {"start_time": "00:00:00", "end_time": "00:00:10"},
+            "_verification_context": {"actual_clip_excerpt": "a"},
+            "_passes_deterministic": True,
+        },
+        {
+            "title": "B",
+            "timing": {"start_time": "00:00:10", "end_time": "00:00:20"},
+            "_verification_context": {"actual_clip_excerpt": "b"},
+            "_passes_deterministic": True,
+        },
+    ]
+
+    responses = iter(
+        [
+            json.dumps({"results": [{"keep": True}]}),
+            json.dumps(
+                {
+                    "keep": True,
+                    "standalone_score": 0.7,
+                    "intent_alignment_score": 0.5,
+                    "reason": "fallback-a",
+                    "repair_diagnosis": "none",
+                }
+            ),
+            json.dumps(
+                {
+                    "keep": False,
+                    "standalone_score": 0.2,
+                    "intent_alignment_score": 0.5,
+                    "reason": "fallback-b",
+                    "repair_diagnosis": "bad_start",
+                }
+            ),
+        ]
+    )
+
+    def fake_simple_chat(_prompt, model=None):
+        return next(responses)
+
+    analyzer.llm_client.simple_chat = fake_simple_chat
+
+    results = coordinator._run_single_verification_batch(candidates, mode="judge")
+
+    assert [result["reason"] for result in results] == ["fallback-a", "fallback-b"]
+
+
+def test_parallel_verification_handles_empty_and_single_batch_cases(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        judge_batch_size=2,
+        max_parallel_judge_batches=2,
+        judge_batch_launch_stagger_seconds=0.0,
+    )
+
+    asyncio.run(coordinator._apply_parallel_verification_batches([], batch_size=2, mode="judge"))
+
+    candidates = [_make_parallel_candidate("Solo")]
+
+    def fake_run_single_verification_batch(batch, mode):
+        return [
+            {
+                "keep": True,
+                "standalone_score": 0.9,
+                "intent_alignment_score": 0.5,
+                "reason": "single-batch",
+                "repair_diagnosis": "none",
+            }
+        ]
+
+    coordinator._run_single_verification_batch = fake_run_single_verification_batch
+
+    asyncio.run(coordinator._apply_parallel_verification_batches(candidates, batch_size=2, mode="judge"))
+
+    assert candidates[0]["_judge_reason"] == "single-batch"
+
+
+def test_parallel_verification_batches_preserve_candidate_order_for_rejudge(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        rejudge_batch_size=2,
+        max_parallel_judge_batches=2,
+        judge_batch_launch_stagger_seconds=0.0,
+    )
+    candidates = [
+        _make_parallel_candidate("A", mode="rejudge", start_time="00:00:00", end_time="00:00:45"),
+        _make_parallel_candidate("B", mode="rejudge", start_time="00:00:45", end_time="00:01:30"),
+        _make_parallel_candidate("C", mode="rejudge", start_time="00:01:30", end_time="00:02:15"),
+        _make_parallel_candidate("D", mode="rejudge", start_time="00:02:15", end_time="00:03:00"),
+    ]
+
+    def fake_run_single_verification_batch(batch, mode):
+        assert mode == "rejudge"
+        titles = [candidate["title"] for candidate in batch]
+        if titles == ["A", "B"]:
+            time.sleep(0.15)
+        else:
+            time.sleep(0.01)
+        return [
+            {
+                "keep": True,
+                "standalone_score": float(ord(title) - 64),
+                "intent_alignment_score": 0.5,
+                "reason": f"rejudge-{title}",
+                "repair_diagnosis": "none",
+            }
+            for title in titles
+        ]
+
+    coordinator._run_single_verification_batch = fake_run_single_verification_batch
+
+    asyncio.run(
+        coordinator._apply_parallel_verification_batches(
+            candidates,
+            batch_size=2,
+            mode="rejudge",
+        )
+    )
+
+    assert [candidate["_rejudge_reason"] for candidate in candidates] == [
+        "rejudge-A",
+        "rejudge-B",
+        "rejudge-C",
+        "rejudge-D",
+    ]
+
+
+def test_parallel_repairs_preserve_original_order(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        max_parallel_repairs=2,
+        repair_launch_stagger_seconds=0.0,
+    )
+    transcript_map = {"part01": "/tmp/unused.srt"}
+    candidates = [
+        {"title": "A", "timing": {"video_part": "part01"}},
+        {"title": "B", "timing": {"video_part": "part01"}},
+        {"title": "C", "timing": {"video_part": "part01"}},
+    ]
+
+    def fake_attempt_boundary_repair(candidate, transcript_map):
+        if candidate["title"] == "A":
+            time.sleep(0.15)
+        else:
+            time.sleep(0.01)
+        return {
+            "title": f"repaired-{candidate['title']}",
+            "timing": {"video_part": "part01", "start_time": "00:00:00", "end_time": "00:00:45"},
+        }
+
+    coordinator._attempt_boundary_repair = fake_attempt_boundary_repair
+
+    repaired, failed = asyncio.run(
+        coordinator._apply_parallel_repairs(
+            candidates,
+            transcript_map,
+        )
+    )
+
+    assert failed == []
+    assert [item["title"] for item in repaired] == ["repaired-A", "repaired-B", "repaired-C"]
+
+
+def test_parallel_repairs_preserve_failed_candidates_for_reporting(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        max_parallel_repairs=2,
+        repair_launch_stagger_seconds=0.0,
+    )
+    transcript_map = {"part01": "/tmp/unused.srt"}
+    candidates = [
+        {
+            "title": "A",
+            "timing": {"video_part": "part01"},
+            "_repair_planner_attempted": True,
+            "_planner_reason": "not enough context",
+            "verification_notes": "old",
+        },
+        {"title": "B", "timing": {"video_part": "part01"}},
+    ]
+
+    def fake_attempt_boundary_repair(candidate, transcript_map):
+        if candidate["title"] == "A":
+            return None
+        return {
+            "title": "repaired-B",
+            "timing": {"video_part": "part01", "start_time": "00:00:00", "end_time": "00:00:45"},
+        }
+
+    coordinator._attempt_boundary_repair = fake_attempt_boundary_repair
+
+    repaired, failed = asyncio.run(
+        coordinator._apply_parallel_repairs(
+            candidates,
+            transcript_map,
+        )
+    )
+
+    assert [item["title"] for item in repaired] == ["repaired-B"]
+    assert [item["title"] for item in failed] == ["A"]
+    assert failed[0]["_planner_reason"] == "not enough context"
+
+
+def test_parallel_repairs_progress_reaches_expected_range(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        max_parallel_repairs=2,
+        repair_launch_stagger_seconds=0.0,
+    )
+    transcript_map = {"part01": "/tmp/unused.srt"}
+    candidates = [
+        {"title": "A", "timing": {"video_part": "part01"}},
+        {"title": "B", "timing": {"video_part": "part01"}},
+    ]
+    progress_events = []
+
+    def fake_attempt_boundary_repair(candidate, transcript_map):
+        return {
+            "title": f"repaired-{candidate['title']}",
+            "timing": {"video_part": "part01", "start_time": "00:00:00", "end_time": "00:00:45"},
+        }
+
+    coordinator._attempt_boundary_repair = fake_attempt_boundary_repair
+
+    asyncio.run(
+        coordinator._apply_parallel_repairs(
+            candidates,
+            transcript_map,
+            progress_callback=lambda status, progress: progress_events.append((status, progress)),
+            progress_start=64,
+            progress_end=68,
+        )
+    )
+
+    assert len(progress_events) == 2
+    assert progress_events[-1][1] == 68
+    assert all("repair" in status for status, _ in progress_events)
+
+
+def test_parallel_repairs_handle_empty_and_single_cases(tmp_path):
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[])
+    coordinator = AnalysisCoordinator(
+        analyzer,
+        max_parallel_repairs=2,
+        repair_launch_stagger_seconds=0.0,
+    )
+    transcript_map = {"part01": "/tmp/unused.srt"}
+
+    repaired, failed = asyncio.run(coordinator._apply_parallel_repairs([], transcript_map))
+    assert repaired == []
+    assert failed == []
+
+    candidates = [{"title": "Solo", "timing": {"video_part": "part01"}}]
+
+    def fake_attempt_boundary_repair(candidate, transcript_map):
+        return {
+            "title": "repaired-Solo",
+            "timing": {"video_part": "part01", "start_time": "00:00:00", "end_time": "00:00:45"},
+        }
+
+    coordinator._attempt_boundary_repair = fake_attempt_boundary_repair
+
+    repaired, failed = asyncio.run(coordinator._apply_parallel_repairs(candidates, transcript_map))
+
+    assert [item["title"] for item in repaired] == ["repaired-Solo"]
+    assert failed == []

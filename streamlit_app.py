@@ -590,28 +590,45 @@ def display_results(result):
 
         editor_project = getattr(result, 'editor_project', None)
         if editor_project and editor_project.get('project_id'):
-            st.subheader('🛠️ Clip Editor')
+            st.header('🛠️ Clip Editor')
             st.caption('Open the post-generation editor for timeline, subtitle, and cover-title adjustments.')
-            launch_col, link_col = st.columns([1, 1])
-            with launch_col:
-                if st.button('🛠️ Open in Editor', key=f"open_editor_{editor_project.get('project_id')}"):
-                    try:
-                        editor_url = ensure_editor_service(
-                            editor_project['project_id'],
-                            projects_root=editor_project.get('projects_root') or str(Path(editor_project['project_root']).parent),
-                            jobs_dir=str((Path.cwd() / 'jobs').resolve()),
-                            open_browser=True,
-                        )
-                        st.session_state.editor_launch_url = editor_url
-                        st.success(f'Editor launched: {editor_url}')
-                    except Exception as exc:
-                        st.warning(f'Editor unavailable: {exc}')
-            editor_url = st.session_state.get('editor_launch_url')
-            if editor_url and editor_project.get('project_id') in editor_url:
-                with link_col:
-                    st.link_button('Open Editor Link', editor_url, use_container_width=True)
+            if st.button('🛠️ Open in Editor', key=f"open_editor_{editor_project.get('project_id')}"):
+                try:
+                    editor_url = ensure_editor_service(
+                        editor_project['project_id'],
+                        projects_root=editor_project.get('projects_root') or str(Path(editor_project['project_root']).parent),
+                        jobs_dir=str((Path.cwd() / 'jobs').resolve()),
+                        open_browser=True,
+                    )
+                    st.session_state.editor_launch_url = editor_url
+                    st.success(f'Editor launched: {editor_url}')
+                except Exception as exc:
+                    st.warning(f'Editor unavailable: {exc}')
     else:
         st.error(f"{t['error']} {result.error_message}")
+
+
+def _is_editor_rerender_job(job) -> bool:
+    return (job.options or {}).get('kind') == 'editor_rerender'
+
+
+def _launch_editor_for_job(job) -> None:
+    project_id = (job.options or {}).get('project_id')
+    projects_root = (job.options or {}).get('projects_root') or str((Path.cwd() / 'processed_videos').resolve())
+    if not project_id:
+        st.warning('Editor project ID missing for this job.')
+        return
+    try:
+        editor_url = ensure_editor_service(
+            project_id,
+            projects_root=projects_root,
+            jobs_dir=str((Path.cwd() / 'jobs').resolve()),
+            open_browser=True,
+        )
+        st.session_state.editor_launch_url = editor_url
+        st.success(f'Editor launched: {editor_url}')
+    except Exception as exc:
+        st.warning(f'Editor unavailable: {exc}')
 
 # Custom CSS
 st.markdown("""
@@ -1239,6 +1256,7 @@ if jobs:
     
     # Show each job
     for job in jobs:
+        is_editor_rerender = _is_editor_rerender_job(job)
         status_emoji = {
             'pending': '⏳',
             'processing': '🔄',
@@ -1274,8 +1292,15 @@ if jobs:
                     st.progress(job.progress / 100)
                     st.caption(f"{job.current_step}")
                 elif job.status.value == 'completed':
-                    st.success("Processing completed!")
-                    if job.result and job.result.get('processing_time'):
+                    st.success("Editor rerender completed!" if is_editor_rerender else "Processing completed!")
+                    if is_editor_rerender:
+                        operation = (job.options or {}).get('operation')
+                        clip_id = (job.options or {}).get('clip_id')
+                        if operation:
+                            st.write(f"**Operation:** {operation}")
+                        if clip_id:
+                            st.caption(f"Clip: {clip_id[:8]}...")
+                    elif job.result and job.result.get('processing_time'):
                         st.write(f"**Time:** {job.result['processing_time']:.1f}s")
                 elif job.status.value == 'failed':
                     st.error(f"Error: {job.error}")
@@ -1287,13 +1312,17 @@ if jobs:
                 button_placeholder = st.empty()
                 
                 if job.status.value == 'completed':
-                    # Show View and Delete buttons
+                    # Show job-specific actions and Delete button
                     with button_placeholder.container():
-                        if st.button("📊 View", key=f"view_{job.id}", use_container_width=True):
-                            # Load result and display
-                            data['processing_result'] = job.result
-                            save_to_file(data)
-                            st.rerun()
+                        if is_editor_rerender:
+                            if st.button("🛠️ Open in Editor", key=f"open_editor_job_{job.id}", use_container_width=True):
+                                _launch_editor_for_job(job)
+                        else:
+                            if st.button("📊 View", key=f"view_{job.id}", use_container_width=True):
+                                # Load result and display
+                                data['processing_result'] = job.result
+                                save_to_file(data)
+                                st.rerun()
                         if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
                             job_manager.delete_job(job.id)
                             st.rerun()
@@ -1407,9 +1436,10 @@ for job_id in st.session_state.processing_job_ids[:]:  # Copy list to iterate sa
 for job in completed_jobs:
     if job.status.value == 'completed':
         st.success(f"✅ Job completed: {job.video_source[:50]}...")
-        # Load result into saved results (only the last completed job)
-        data['processing_result'] = job.result
-        save_to_file(data)
+        if not _is_editor_rerender_job(job):
+            # Load result into saved results (only the last completed job)
+            data['processing_result'] = job.result
+            save_to_file(data)
     elif job.status.value == 'failed':
         st.error(f"❌ Job failed: {job.video_source[:50]}... - {job.error}")
     elif job.status.value == 'cancelled':
@@ -1562,21 +1592,34 @@ def _finalize_results(result):
 
 # Display saved results if they exist and we didn't just process a video
 if data['processing_result'] and not just_processed:
-    st.header("📊 Saved Results")
+    header_col, action_col = st.columns([5, 1])
+    with header_col:
+        st.header("📊 Saved Results")
+    with action_col:
+        st.write("")
+        st.write("")
+        clear_saved_results = st.button("Clear Saved Results", key="clear_saved_results_header")
+    if 'success' not in data['processing_result']:
+        st.info("Saved results are only available for full processing jobs. Open editor rerender results from the job card instead.")
+        if clear_saved_results:
+            data['processing_result'] = None
+            save_to_file(data)
+            st.rerun()
+    else:
     # Convert dictionary back to object-like structure
-    class ResultObject:
-        def __init__(self, data):
-            for key, value in data.items():
-                setattr(self, key, value)
+        class ResultObject:
+            def __init__(self, data):
+                for key, value in data.items():
+                    setattr(self, key, value)
 
-    result_obj = ResultObject(data['processing_result'])
-    display_results(result_obj)
-    
-    # Add a button to clear saved results
-    if st.button("Clear Saved Results"):
-        data['processing_result'] = None
-        save_to_file(data)
-        st.rerun()
+        result_obj = ResultObject(data['processing_result'])
+        display_results(result_obj)
+        
+        # Add a button to clear saved results
+        if clear_saved_results:
+            data['processing_result'] = None
+            save_to_file(data)
+            st.rerun()
 
 # Footer
 st.markdown("""

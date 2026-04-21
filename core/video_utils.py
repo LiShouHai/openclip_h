@@ -40,6 +40,11 @@ class ProcessingResult:
         self.clip_generation = {}  # Results from clip generation
         self.post_processing = {}  # Results from post-processing (titles and/or subtitles)
         self.cover_generation = {}  # Results from cover image generation
+        self.source_video_path = ""
+        self.part_offsets = {}
+        self.editor_project_id = ""
+        self.editor_manifest_path = ""
+        self.editor_project = {}  # Editor manifest/project metadata
 
 
 class ResultsFormatter:
@@ -146,6 +151,10 @@ class ResultsFormatter:
             else:
                 error = cover_gen.get('error', 'Unknown error')
                 print(f"\n🖼️  COVER GENERATION: Failed - {error}")
+
+        if getattr(result, 'editor_project_id', ''):
+            print(f"\n🧭 EDITOR PROJECT: {result.editor_project_id}")
+            print(f"   Manifest: {getattr(result, 'editor_manifest_path', 'N/A')}")
         
         print("\n" + "="*60)
 

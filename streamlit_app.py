@@ -22,6 +22,7 @@ from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 from video_orchestrator import VideoOrchestrator
 from core.config import API_KEY_ENV_VARS, DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, LLM_CONFIG, SUPPORTED_LLM_PROVIDERS
 from core.transcript_generation_whisperx import WHISPERX_AVAILABLE
+from core.editor import ensure_editor_service
 from core.downloaders.bilibili_downloader import ImprovedBilibiliDownloader
 
 # Import job manager for background processing
@@ -586,6 +587,29 @@ def display_results(result):
         # Display output directory
         if output_dir:
             st.info(f"📁 All outputs saved to: {output_dir}")
+
+        editor_project = getattr(result, 'editor_project', None)
+        if editor_project and editor_project.get('project_id'):
+            st.subheader('🛠️ Clip Editor')
+            st.caption('Open the post-generation editor for timeline, subtitle, and cover-title adjustments.')
+            launch_col, link_col = st.columns([1, 1])
+            with launch_col:
+                if st.button('🛠️ Open in Editor', key=f"open_editor_{editor_project.get('project_id')}"):
+                    try:
+                        editor_url = ensure_editor_service(
+                            editor_project['project_id'],
+                            projects_root=editor_project.get('projects_root') or str(Path(editor_project['project_root']).parent),
+                            jobs_dir=str((Path.cwd() / 'jobs').resolve()),
+                            open_browser=True,
+                        )
+                        st.session_state.editor_launch_url = editor_url
+                        st.success(f'Editor launched: {editor_url}')
+                    except Exception as exc:
+                        st.warning(f'Editor unavailable: {exc}')
+            editor_url = st.session_state.get('editor_launch_url')
+            if editor_url and editor_project.get('project_id') in editor_url:
+                with link_col:
+                    st.link_button('Open Editor Link', editor_url, use_container_width=True)
     else:
         st.error(f"{t['error']} {result.error_message}")
 
@@ -1173,6 +1197,7 @@ def process_video_worker(job, progress_callback):
         'clip_generation': getattr(result, 'clip_generation', None),
         'post_processing': getattr(result, 'post_processing', None),
         'cover_generation': getattr(result, 'cover_generation', None),
+        'editor_project': getattr(result, 'editor_project', None),
     }
 
 
@@ -1529,6 +1554,7 @@ def _finalize_results(result):
             'clip_generation': getattr(result, 'clip_generation', None),
             'post_processing': getattr(result, 'post_processing', None),
             'cover_generation': getattr(result, 'cover_generation', None),
+            'editor_project': getattr(result, 'editor_project', None),
         }
     
     data['processing_result'] = result

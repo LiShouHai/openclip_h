@@ -27,6 +27,7 @@ from core.clip_generator import ClipGenerator
 from core.title_adder import TitleAdder, TITLE_FONT_SIZES
 from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 from core.cover_image_generator import CoverImageGenerator, COVER_COLORS
+from core.editor import load_manifest, upsert_manifest
 
 # Import our utilities (including processing result classes)
 from core.video_utils import (
@@ -129,6 +130,11 @@ class VideoOrchestrator:
         self.mode = mode
         self.agentic_analysis = agentic_analysis
         self.title_font_size = TITLE_FONT_SIZES.get(title_font_size, 40)
+        self.subtitle_style_preset = subtitle_style_preset
+        self.subtitle_style_font_size = subtitle_style_font_size
+        self.subtitle_style_vertical_position = subtitle_style_vertical_position
+        self.subtitle_style_bilingual_layout = subtitle_style_bilingual_layout
+        self.subtitle_style_background_style = subtitle_style_background_style
         self.cover_text_location = cover_text_location
         self.cover_fill_color = cover_fill_color
         self.cover_outline_color = cover_outline_color
@@ -311,6 +317,7 @@ class VideoOrchestrator:
                 logger.info("📁 Step 1: Processing local video file...")
                 file_result = await self._process_local_video(source, progress_callback)
                 result.video_path = file_result['video_path']
+                result.source_video_path = file_result['video_path']
                 result.video_info = file_result['video_info']
                 subtitle_path = file_result.get('subtitle_path', '')
             else:
@@ -323,6 +330,7 @@ class VideoOrchestrator:
                         raise Exception("No existing download found. Remove --skip-download to download the video.")
 
                     result.video_path = download_result['video_path']
+                    result.source_video_path = download_result['video_path']
                     result.video_info = download_result['video_info']
                     subtitle_path = download_result['subtitle_path']
                 else:
@@ -334,6 +342,7 @@ class VideoOrchestrator:
                         raise Exception("Video download failed")
 
                     result.video_path = download_result['video_path']
+                    result.source_video_path = download_result['video_path']
                     result.video_info = download_result['video_info']
                     subtitle_path = download_result['subtitle_path']
 
@@ -361,6 +370,7 @@ class VideoOrchestrator:
                 result.was_split = True
                 result.video_parts = split_result['video_parts']
                 result.transcript_parts = split_result['transcript_parts']
+                result.part_offsets = split_result.get('part_offsets', {})
             else:
                 # Treat single video as split video with one part (_part01)
                 video_file = Path(result.video_path)
@@ -374,6 +384,7 @@ class VideoOrchestrator:
                 result.was_split = True
                 result.video_parts = [str(splits_video)]
                 result.video_path = str(splits_video)
+                result.part_offsets = {"part01": 0.0}
 
                 if subtitle_path and Path(subtitle_path).exists():
                     sub_file = Path(subtitle_path)
@@ -536,6 +547,8 @@ class VideoOrchestrator:
                             "total_clips": total,
                             "successful_clips": successful,
                             "failed_clips": total - successful,
+                            "title_style": self.title_style,
+                            "title_overlay_enabled": True,
                         }
                         logger.info(f"   {successful}/{total} clips post-processed (title + subtitles)")
 
@@ -549,6 +562,7 @@ class VideoOrchestrator:
                             clip_filenames=_current_clips,
                             clip_titles=_clip_titles,
                         )
+                        subtitle_result["title_overlay_enabled"] = False
                         result.post_processing = subtitle_result
 
                     elif has_titles:
@@ -560,6 +574,7 @@ class VideoOrchestrator:
                             self.title_font_size,
                             progress_callback=title_progress_callback,
                         )
+                        title_result["title_overlay_enabled"] = True
                         result.post_processing = title_result
             elif self.clip_generator and not engaging_result:
                 logger.warning("⚠️  Clip generation enabled but no analysis file found")
@@ -573,6 +588,8 @@ class VideoOrchestrator:
                 # Pass the video-specific clip directory to cover generation
                 cover_result = self._generate_cover_image(result, engaging_result, video_clips_dir, video_titles_dir)
                 result.cover_generation = cover_result
+
+            self._refresh_editor_manifest(result, video_root_dir)
             
             result.success = True
             
@@ -1016,6 +1033,7 @@ class VideoOrchestrator:
                     self.title_font_size,
                     progress_callback=title_progress_wrapper
                 )
+                title_result["title_overlay_enabled"] = True
                 result.post_processing = title_result
 
             # Step 7: Generate cover images (if enabled)
@@ -1030,6 +1048,8 @@ class VideoOrchestrator:
                 )
                 result.cover_generation = cover_result
 
+            self._refresh_editor_manifest(result, video_root_dir)
+
             if progress_callback:
                 progress_callback("Phase 2 completed!", 100)
 
@@ -1039,6 +1059,39 @@ class VideoOrchestrator:
                 progress_callback(f"Phase 2 failed: {e}", 0)
 
         return result
+
+    def _refresh_editor_manifest(self, result: ProcessingResult, video_root_dir: Path) -> None:
+        """Write or refresh the editor manifest when clip outputs exist."""
+        clip_generation = getattr(result, "clip_generation", None) or {}
+        if not clip_generation.get("success") or not clip_generation.get("clips_info"):
+            return
+
+        manifest_path = upsert_manifest(
+            video_root_dir=video_root_dir,
+            result=result,
+            title_style=self.title_style,
+            title_font_size=self.title_font_size,
+            subtitle_translation=self.subtitle_translation,
+            subtitle_style_preset=self.subtitle_style_preset,
+            subtitle_style_font_size=self.subtitle_style_font_size,
+            subtitle_style_vertical_position=self.subtitle_style_vertical_position,
+            subtitle_style_bilingual_layout=self.subtitle_style_bilingual_layout,
+            subtitle_style_background_style=self.subtitle_style_background_style,
+            cover_text_location=self.cover_text_location,
+            cover_fill_color=self.cover_fill_color,
+            cover_outline_color=self.cover_outline_color,
+        )
+        manifest = load_manifest(manifest_path)
+        result.editor_project_id = manifest.project_id
+        result.editor_manifest_path = str(manifest_path)
+        result.editor_project = {
+            "project_id": manifest.project_id,
+            "manifest_path": str(manifest_path),
+            "project_root": str(video_root_dir),
+            "projects_root": str(video_root_dir.parent),
+        }
+        result.clip_generation["editor_project_id"] = manifest.project_id
+        result.clip_generation["editor_manifest_path"] = str(manifest_path)
 
     def _generate_cover_image(self, result: ProcessingResult, engaging_result: Dict[str, Any],
                              clips_dir: Path, covers_output_dir: Path) -> Dict[str, Any]:
@@ -1098,11 +1151,14 @@ class VideoOrchestrator:
                 )
                 
                 if success:
+                    vertical_cover_path = cover_path.with_name(cover_path.stem + '_vertical' + cover_path.suffix)
                     generated_covers.append({
                         'rank': rank,
                         'title': moment_title,
                         'filename': cover_filename,
-                        'path': str(cover_path)
+                        'path': str(cover_path),
+                        'vertical_filename': vertical_cover_path.name if vertical_cover_path.exists() else None,
+                        'vertical_path': str(vertical_cover_path) if vertical_cover_path.exists() else None,
                     })
                     logger.info(f"✓ Cover saved: {cover_filename}")
                 else:

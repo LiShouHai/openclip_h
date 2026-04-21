@@ -34,6 +34,7 @@ class VideoSplitter:
     
     def __init__(self, max_duration_minutes: float = MAX_DURATION_MINUTES, output_dir: Optional[Path] = None):
         self.subtitles: List[SubtitleSegment] = []
+        self.last_split_points: List[tuple[Any, ...]] = []
         self.max_duration_minutes = max_duration_minutes
         self.max_duration_seconds = max_duration_minutes * 60
         self.output_dir = output_dir or Path("output_parts")
@@ -230,6 +231,8 @@ class VideoSplitter:
             except Exception as e:
                 print(f"❌ Error getting video duration: {e}")
                 return False
+
+        self.last_split_points = list(split_points)
         
         # Get base filename without extension
         base_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -390,7 +393,12 @@ class VideoSplitter:
         
         return {
             'video_parts': video_parts,
-            'transcript_parts': transcript_parts
+            'transcript_parts': transcript_parts,
+            'part_offsets': {
+                f"part{index:02d}": start_time
+                for index, split_point in enumerate(self.last_split_points, 1)
+                for start_time in [split_point[0]]
+            },
         }
 
 

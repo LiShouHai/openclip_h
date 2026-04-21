@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from core.video_splitter import VideoSplitter
 from video_orchestrator import VideoOrchestrator
 
 
@@ -149,3 +150,130 @@ def test_agentic_analysis_routes_through_coordinator(tmp_path, monkeypatch):
 
     assert result.success is True
     assert result.engaging_moments_analysis["agentic_analysis"] is True
+
+
+def test_process_video_emits_editor_manifest(tmp_path, monkeypatch):
+    source_video = tmp_path / "input.mp4"
+    source_video.write_bytes(b"fake-video")
+    source_subtitle = tmp_path / "input.srt"
+    source_subtitle.write_text(
+        "1\n00:00:00,000 --> 00:00:30,000\nTranscript line.\n",
+        encoding="utf-8",
+    )
+
+    orchestrator = VideoOrchestrator(
+        output_dir=str(tmp_path / "output"),
+        skip_analysis=True,
+        generate_clips=True,
+        generate_cover=True,
+        add_titles=False,
+        burn_subtitles=False,
+    )
+
+    async def fake_is_local_video_file(_source: str) -> bool:
+        return True
+
+    async def fake_process_local_video(_video_path: str, _progress_callback):
+        return {
+            "video_path": str(source_video),
+            "video_info": {
+                "title": "input",
+                "duration": 60,
+                "uploader": "Local File",
+            },
+            "subtitle_path": str(source_subtitle),
+        }
+
+    async def fake_process_transcripts(_subtitle_path, _video_path, _force_whisper, _progress_callback):
+        output_srt = Path(orchestrator.output_dir) / "input" / "splits" / "input_part01.srt"
+        output_srt.parent.mkdir(parents=True, exist_ok=True)
+        output_srt.write_text(source_subtitle.read_text(encoding="utf-8"), encoding="utf-8")
+        return {
+            "source": "existing",
+            "transcript_parts": [str(output_srt)],
+        }
+
+    aggregated_file = Path(orchestrator.output_dir) / "input" / "splits" / "top_engaging_moments.json"
+    aggregated_file.parent.mkdir(parents=True, exist_ok=True)
+    aggregated_file.write_text(
+        '{"top_engaging_moments":[{"rank":1,"title":"Clip Title","why_engaging":"Hook","engagement_details":{"engagement_level":"high"},"timing":{"video_part":"part01","start_time":"00:00:05","end_time":"00:00:20","duration":15}}]}',
+        encoding="utf-8",
+    )
+
+    def fake_generate_clips(_analysis_file, _video_dir, _subtitle_dir):
+        clips_dir = Path(orchestrator.output_dir) / "input" / "clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        raw_clip = clips_dir / "rank_01_clip_title.mp4"
+        raw_clip.write_bytes(b"clip")
+        clip_srt = clips_dir / "rank_01_clip_title.srt"
+        clip_srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nClip subtitle\n", encoding="utf-8")
+        return {
+            "success": True,
+            "total_clips": 1,
+            "successful_clips": 1,
+            "clips_info": [
+                {
+                    "rank": 1,
+                    "title": "Clip Title",
+                    "filename": raw_clip.name,
+                    "subtitle_filename": clip_srt.name,
+                    "whisper_subtitle_filename": None,
+                    "duration": 15.0,
+                    "video_part": "part01",
+                    "time_range": "00:00:05 - 00:00:20",
+                    "original_time_range": "00:00:05 - 00:00:20",
+                    "normalization_details": {"start": "unchanged", "end": "unchanged"},
+                    "engagement_level": "high",
+                    "why_engaging": "Hook",
+                }
+            ],
+            "output_dir": str(clips_dir),
+        }
+
+    def fake_generate_cover(_video_path, _title_text, output_path, **_kwargs):
+        Path(output_path).write_bytes(b"jpg")
+        Path(output_path.replace(".jpg", "_vertical.jpg")).write_bytes(b"jpg")
+        return True
+
+    monkeypatch.setattr(orchestrator, "_is_local_video_file", fake_is_local_video_file)
+    monkeypatch.setattr(orchestrator, "_process_local_video", fake_process_local_video)
+    monkeypatch.setattr(orchestrator.transcript_processor, "process_transcripts", fake_process_transcripts)
+    monkeypatch.setattr(orchestrator, "_find_existing_analysis", lambda _result: {"aggregated_file": str(aggregated_file)})
+    monkeypatch.setattr(orchestrator.clip_generator, "generate_clips_from_analysis", fake_generate_clips)
+    monkeypatch.setattr(orchestrator.cover_generator, "generate_cover", fake_generate_cover)
+
+    result = asyncio.run(orchestrator.process_video(str(source_video), skip_transcript=False, progress_callback=None))
+
+    manifest_path = Path(orchestrator.output_dir) / "input" / "editor_project.json"
+    assert result.success is True
+    assert manifest_path.exists()
+    assert result.editor_project_id
+    assert result.clip_generation["editor_manifest_path"] == str(manifest_path)
+
+
+def test_split_video_async_returns_part_offsets(tmp_path, monkeypatch):
+    splitter = VideoSplitter(output_dir=tmp_path / "out")
+
+    def fake_split(_video_path, _subtitle_path, _duration_minutes, _output_dir):
+        splitter.last_split_points = [(0.0, 600.0), (600.0, 1200.0)]
+        return True
+
+    monkeypatch.setattr(splitter, "split_by_time_duration", fake_split)
+    monkeypatch.setattr(
+        "core.video_utils.VideoFileManager.find_video_parts",
+        lambda _splits_dir, _base_name: (
+            [str(tmp_path / "out" / "demo_part01.mp4"), str(tmp_path / "out" / "demo_part02.mp4")],
+            [str(tmp_path / "out" / "demo_part01.srt"), str(tmp_path / "out" / "demo_part02.srt")],
+        ),
+    )
+
+    result = asyncio.run(
+        splitter.split_video_async(
+            "demo.mp4",
+            "demo.srt",
+            progress_callback=None,
+            splits_dir=tmp_path / "out",
+        )
+    )
+
+    assert result["part_offsets"] == {"part01": 0.0, "part02": 600.0}

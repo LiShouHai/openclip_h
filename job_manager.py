@@ -7,10 +7,11 @@ Simple threading-based approach without Celery/Redis
 import json
 import uuid
 import threading
-import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Callable
+
+from core.upload_staging import SOURCE_KIND_UPLOADED_FILE
 from enum import Enum
 import logging
 
@@ -65,7 +66,7 @@ class Job:
         job = cls(
             job_id=data['id'],
             video_source=data['video_source'],
-            options=data['options']
+            options=data.get('options') or {}
         )
         job.status = JobStatus(data['status'])
         job.progress = data['progress']
@@ -139,9 +140,8 @@ class JobManager:
         with self._lock:
             return self.active_jobs.get(job_id)
     
-    def list_jobs(self, limit: int = 50) -> list[Job]:
-        """List all jobs, most recent first"""
-        # Load all jobs from disk (including completed ones)
+    def _load_all_jobs(self) -> list[Job]:
+        """Load all jobs from disk, including completed ones."""
         all_jobs = []
         for job_file in self.jobs_dir.glob("*.json"):
             try:
@@ -151,9 +151,39 @@ class JobManager:
                 all_jobs.append(job)
             except Exception as e:
                 logger.error(f"Error loading job from {job_file}: {e}")
-        
-        # Sort by created_at descending
+
         all_jobs.sort(key=lambda j: j.created_at, reverse=True)
+        return all_jobs
+
+    @staticmethod
+    def _job_owner_session_id(job: Job) -> str | None:
+        options = job.options or {}
+        owner_session_id = options.get("owner_session_id")
+        if owner_session_id is None:
+            return None
+        return str(owner_session_id)
+
+    @staticmethod
+    def _job_matches_owner(job: Job, owner_session_id: str, include_ownerless: bool = False) -> bool:
+        job_owner_session_id = JobManager._job_owner_session_id(job)
+        if job_owner_session_id is None:
+            return include_ownerless
+        return job_owner_session_id == owner_session_id
+
+    def list_jobs(
+        self,
+        limit: int = 50,
+        *,
+        owner_session_id: str | None = None,
+        include_ownerless: bool = False,
+    ) -> list[Job]:
+        """List jobs, optionally filtered by owner session."""
+        all_jobs = self._load_all_jobs()
+        if owner_session_id is not None:
+            all_jobs = [
+                job for job in all_jobs
+                if self._job_matches_owner(job, owner_session_id, include_ownerless=include_ownerless)
+            ]
         return all_jobs[:limit]
     
     def start_job(self, job_id: str, worker_func: Callable):
@@ -236,7 +266,7 @@ class JobManager:
         logger.info(f"Job {job_id} cancelled")
     
     def delete_job(self, job_id: str):
-        """Delete a job and its data"""
+        """Delete a job record. Upload cleanup is handled separately."""
         job_file = self.jobs_dir / f"{job_id}.json"
         if job_file.exists():
             job_file.unlink()
@@ -276,12 +306,17 @@ class JobManager:
             logger.error(f"Job {job_id} not found for retry")
             return None
         
+        options = dict(original_job.options or {})
+        if options.get("source_kind") == SOURCE_KIND_UPLOADED_FILE and options.get("source_deleted"):
+            logger.warning(f"Upload-backed job {job_id} cannot be retried after source deletion")
+            return None
+
         # Create a new job with the same parameters
         new_job_id = str(uuid.uuid4())
         new_job = Job(
             job_id=new_job_id,
             video_source=original_job.video_source,
-            options=original_job.options
+            options=options
         )
         
         with self._lock:
@@ -291,6 +326,30 @@ class JobManager:
         logger.info(f"Created retry job {new_job_id} for failed job {job_id}")
         return new_job_id
     
+
+    def has_active_upload_reference(self, upload_id: str) -> bool:
+        """Return True when a pending/processing job still references the upload."""
+        for job in self._load_all_jobs():
+            options = job.options or {}
+            if options.get("upload_id") != upload_id:
+                continue
+            if job.status in {JobStatus.PENDING, JobStatus.PROCESSING}:
+                return True
+        return False
+
+    def mark_upload_deleted(self, upload_id: str) -> None:
+        """Mark upload-backed jobs as source-deleted so retry becomes unavailable."""
+        for job in self._load_all_jobs():
+            options = dict(job.options or {})
+            if options.get("upload_id") != upload_id:
+                continue
+            options["source_deleted"] = True
+            job.options = options
+            self._save_job(job)
+            with self._lock:
+                if job.id in self.active_jobs:
+                    self.active_jobs[job.id].options = dict(options)
+
     def cleanup_old_jobs(self, days: int = 7):
         """Delete jobs older than specified days"""
         cutoff = datetime.now().timestamp() - (days * 24 * 60 * 60)
@@ -307,9 +366,14 @@ class JobManager:
             except Exception as e:
                 logger.error(f"Error cleaning up {job_file}: {e}")
     
-    def get_stats(self) -> Dict[str, int]:
-        """Get job statistics"""
-        all_jobs = self.list_jobs(limit=1000)
+    def get_stats(
+        self,
+        *,
+        owner_session_id: str | None = None,
+        include_ownerless: bool = False,
+    ) -> Dict[str, int]:
+        """Get job statistics, optionally filtered by owner session."""
+        all_jobs = self.list_jobs(limit=1000, owner_session_id=owner_session_id, include_ownerless=include_ownerless)
         
         stats = {
             'total': len(all_jobs),

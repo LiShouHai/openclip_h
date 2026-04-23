@@ -83,3 +83,5 @@ CLAUDE.md
 .kiro/steering/
 .kiro/hooks/
 openclip-dev-config/
+!editor_frontend/dist/
+!editor_frontend/dist/**

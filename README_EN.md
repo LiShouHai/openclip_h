@@ -17,6 +17,9 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
 
 ## 📢 News
 
+- **2026-04-23**:
+  - Added a post-processing `Clip Editor` for per-clip boundary, subtitle, cover-title, and cover-image adjustments, with support for speed-based rerendering
+  - Added an in-browser `File Upload` entry in Streamlit so local videos can be uploaded directly to create processing jobs
 - **2026-04-19**:
   - Added `--deep-optimize` / Streamlit “Deep Optimize” mode: after candidate highlight aggregation, OpenClip runs extra AI review, boundary repair, and re-review steps to improve clip boundaries and standalone quality. See [With `--deep-optimize`](#with---deep-optimize)
 - **2026-04-04**:
@@ -27,15 +30,15 @@ Give it a video URL or local file, and it handles the full pipeline: **Download 
   - Added Streamlit UI support for one-click job creation for multi-part Bilibili videos, background job retry, and cancelling pending jobs after restart, thanks to [@xenoamess](https://github.com/xenoamess)
 - **2026-03-25**:
   - Added [Cookie Guidance](#cookie-guidance) and a clearer Streamlit `Cookie Mode`; for remote videos, try `No cookies` → `Browser cookies` → `Cookies file` in that order
+<details>
+<summary>Older updates</summary>
+
 - **2026-03-24**:
   - Added [GLM (ZhipuAI)](https://bigmodel.cn) and [MiniMax](https://minimaxi.com) as LLM providers — OpenClip now supports Qwen, OpenRouter, GLM, MiniMax, and `custom_openai`
 - **2026-03-11**:
   - OpenClip is now on skills.sh — install it as an Agent Skill via `npx skills add https://github.com/linzzzzzz/openclip --skill video-clip-extractor` and let your agent invoke it from any directory
 - **2026-03-08**:
   - Added `--user-intent` argument — tell the AI what you're looking for in natural language (e.g. `--user-intent "moments about AI risks"`); steers clip selection and ranking at both the per-part and aggregation stages
-<details>
-<summary>Older updates</summary>
-
 - **2026-03-04**:
   - **Git History Notice**: A mistaken attempt to reduce GitHub repo size caused the git history to be rewritten. Sorry for the inconvenience. Existing users need to run `git fetch origin && git reset --hard origin/main` to sync with the latest history
   - Added [subtitle burning](#subtitle-burning) — use `--burn-subtitles` to hard-burn SRT subtitles into clip videos; optionally add `--subtitle-translation "Simplified Chinese"` to burn bilingual subtitles (requires ffmpeg with libass)

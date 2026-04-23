@@ -11,6 +11,7 @@ export interface ClipDraft {
   localTimeRange?: string
   partAbsoluteStart?: number
   partAbsoluteEnd?: number
+  speed: number
   subtitleText: string
   subtitleSegments: SubtitleSegmentDraft[]
   coverTitle: string
@@ -44,6 +45,8 @@ export interface EditorProject {
 export interface DirtyState {
   hasChanges: boolean
   boundsDirty: boolean
+  speedDirty: boolean
+  boundaryDirty: boolean
   subtitlesDirty: boolean
   coverTitleDirty: boolean
   coverNeedsRefresh: boolean
@@ -97,6 +100,7 @@ interface ManifestClip {
   absolute_start_time?: string
   absolute_end_time?: string
   absolute_time_range?: string
+  speed?: number
   subtitle_recipe?: ManifestClipRecipe
   subtitle_segments?: ManifestSubtitleSegment[]
   effective_subtitle_text?: string
@@ -211,14 +215,17 @@ export function clampBoundsWithinRange(
 
 export function getDirtyState(savedClip: ClipDraft, draftClip: ClipDraft): DirtyState {
   const boundsDirty = savedClip.start !== draftClip.start || savedClip.end !== draftClip.end
+  const speedDirty = savedClip.speed !== draftClip.speed
   const subtitlesDirty = serializeSubtitleSegments(savedClip.subtitleSegments) !== serializeSubtitleSegments(draftClip.subtitleSegments)
   const coverTitleDirty = savedClip.coverTitle !== draftClip.coverTitle
   return {
-    hasChanges: boundsDirty || subtitlesDirty || coverTitleDirty,
+    hasChanges: boundsDirty || speedDirty || subtitlesDirty || coverTitleDirty,
     boundsDirty,
+    speedDirty,
+    boundaryDirty: boundsDirty || speedDirty,
     subtitlesDirty,
     coverTitleDirty,
-    coverNeedsRefresh: Boolean(draftClip.coverDirty) || boundsDirty || coverTitleDirty,
+    coverNeedsRefresh: Boolean(draftClip.coverDirty) || boundsDirty || speedDirty || coverTitleDirty,
   }
 }
 
@@ -255,6 +262,7 @@ export function summarizeDirtyState(state: DirtyState): string {
   }
   const tokens = []
   if (state.boundsDirty) tokens.push('bounds')
+  if (state.speedDirty) tokens.push('speed')
   if (state.subtitlesDirty) tokens.push('subtitles')
   if (state.coverNeedsRefresh) tokens.push('cover')
   return `Unsaved ${tokens.join(' + ')}`
@@ -305,6 +313,7 @@ export function projectFromManifest(manifest: EditorManifest): EditorProject {
         partAbsoluteEnd: clip.part_duration_seconds !== undefined && clip.part_duration_seconds !== null
           ? Number(clip.part_offset_seconds ?? 0) + Number(clip.part_duration_seconds)
           : undefined,
+        speed: Number(clip.speed ?? 1),
         subtitleText,
         subtitleSegments,
         coverTitle: clip.cover_recipe?.text ?? clip.title,

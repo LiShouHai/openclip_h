@@ -359,6 +359,7 @@ def build_manifest(
                     "title_overlay_enabled": bool(post_processing.get("title_overlay_enabled", post_processing.get("title_style"))),
                     "absolute_original_time_range": f"{absolute_original_start_time} - {absolute_original_end_time}",
                 },
+                speed=existing_clip.speed if existing_clip else 1.0,
                 updated_at=utc_now_iso(),
             )
         )

@@ -31,10 +31,14 @@ const editorEndpoints = [
 const emptyDirtyState = {
   hasChanges: false,
   boundsDirty: false,
+  speedDirty: false,
+  boundaryDirty: false,
   subtitlesDirty: false,
   coverTitleDirty: false,
   coverNeedsRefresh: false,
 }
+
+const speedOptions = [1, 1.25, 1.5, 2, 3]
 
 const jobPollIntervalMs = 1000
 const jobPollTimeoutMs = 5 * 60 * 1000
@@ -98,6 +102,10 @@ function rawMessage(text: string): UiText {
   return { raw: text }
 }
 
+function formatSpeedLabel(speed: number): string {
+  return `${speed}x`
+}
+
 function buildPreviewWindow(clip?: ClipDraft, projectSourceVideoUrl?: string): PreviewWindow | null {
   if (!clip) {
     return null
@@ -138,6 +146,7 @@ function App() {
   const activeDirtyState = activeClip && savedActiveClip ? getDirtyState(savedActiveClip, activeClip) : emptyDirtyState
   const activePartStart = activeClip?.partAbsoluteStart ?? 0
   const activePartEnd = activeClip?.partAbsoluteEnd ?? draftProject.totalDuration
+  const outputDuration = activeClip ? (activeClip.end - activeClip.start) / Math.max(activeClip.speed, 0.001) : 0
   const dirtyClipCount = draftProject.clips.filter((clip) => {
     const savedClip = savedClipMap.get(clip.id)
     return savedClip ? getDirtyState(savedClip, clip).hasChanges || Boolean(clip.coverDirty) : false
@@ -371,6 +380,7 @@ function App() {
     }
     const tokens = []
     if (state.boundsDirty) tokens.push(t(locale, 'dirtyTokenBounds'))
+    if (state.speedDirty) tokens.push(t(locale, 'dirtyTokenSpeed'))
     if (state.subtitlesDirty) tokens.push(t(locale, 'dirtyTokenSubtitles'))
     if (state.coverNeedsRefresh) tokens.push(t(locale, 'dirtyTokenCover'))
     return t(locale, 'dirtySummary', { items: tokens.join(' + ') })
@@ -426,13 +436,14 @@ function App() {
     const savedClip = savedClipMap.get(clip.id)
     if (!savedClip) return
 
-    if (savedClip.start !== clip.start || savedClip.end !== clip.end) {
+    if (savedClip.start !== clip.start || savedClip.end !== clip.end || savedClip.speed !== clip.speed) {
       const response = await fetch(`/api/projects/${projectId}/clips/${clip.id}/bounds`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           start_time: formatApiTimestamp(clip.start),
           end_time: formatApiTimestamp(clip.end),
+          speed: clip.speed,
         }),
       })
       await assertOk(response, 'Saving clip bounds')
@@ -796,7 +807,7 @@ function App() {
               </div>
               <div className="timeline-shell__summary">
                 <article><span>{t(locale, 'candidateClip')}</span><strong>{formatTimestamp(activeClip.start)} → {formatTimestamp(activeClip.end)}</strong></article>
-                <article><span>{t(locale, 'duration')}</span><strong>{formatTimestamp(activeClip.end - activeClip.start)}</strong></article>
+                <article><span>{t(locale, 'duration')}</span><strong>{formatTimestamp(outputDuration)}</strong></article>
                 <article><span>{t(locale, 'partLocalDebug')}</span><strong>{formatTimestamp(activeClip.localStart)} → {formatTimestamp(activeClip.localEnd)}</strong></article>
                 <article><span>{t(locale, 'coverState')}</span><strong>{activeDirtyState.coverNeedsRefresh ? t(locale, 'needsRerender') : t(locale, 'currentAssetsUsable')}</strong></article>
               </div>
@@ -808,8 +819,28 @@ function App() {
               ) : (
                 <p className="muted">{t(locale, 'sourceVideoPreviewUnavailable')}</p>
               )}
-              <div className="editor-actions">
-                <button type="button" className="action-button action-button--secondary" disabled={loading || !activeDirtyState.boundsDirty || Boolean(boundaryRerenderMessage)} onClick={() => void handleQueue('boundary')}>{getQueueButtonLabel('boundary')}</button>
+              <div className="timeline-shell__actions">
+                <div className="timeline-shell__primary-actions">
+                  <button type="button" className="action-button action-button--secondary" disabled={loading || !activeDirtyState.boundaryDirty || Boolean(boundaryRerenderMessage)} onClick={() => void handleQueue('boundary')}>{getQueueButtonLabel('boundary')}</button>
+                  <label className="timeline-speed-control">
+                    <span>{t(locale, 'playbackSpeed')}</span>
+                    <select
+                      aria-label={t(locale, 'playbackSpeed')}
+                      value={String(activeClip.speed)}
+                      disabled={loading}
+                      onChange={(event) => {
+                        const speed = Number(event.currentTarget.value)
+                        updateClip(activeClip.id, (clip) => ({
+                          ...clip,
+                          speed,
+                          coverDirty: true,
+                        }))
+                      }}
+                    >
+                      {speedOptions.map((speed) => <option key={speed} value={String(speed)}>{formatSpeedLabel(speed)}</option>)}
+                    </select>
+                  </label>
+                </div>
                 {activeClip.renderStatus === 'Recoverable' ? (
                   <button type="button" className="action-button action-button--secondary" disabled={loading} onClick={() => void handleResume()}>{t(locale, 'resumeRerender')}</button>
                 ) : null}

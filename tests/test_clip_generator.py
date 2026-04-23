@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 from pathlib import Path
 
 from core.clip_generator import ClipGenerator
@@ -132,3 +134,75 @@ def test_create_summary_tolerates_partial_analysis_summary(tmp_path):
     content = summary_path.read_text(encoding="utf-8")
     assert "Generated Clips" in content
     assert "Test Clip" in content
+
+
+def test_create_clip_with_speed_shortens_output_duration(tmp_path):
+    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+        raise AssertionError("ffmpeg and ffprobe are required for this test")
+
+    source_video = tmp_path / "source.mp4"
+    output_video = tmp_path / "sped_up.mp4"
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=160x90:rate=30",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=44100",
+            "-t",
+            "3",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-pix_fmt",
+            "yuv420p",
+            "-y",
+            str(source_video),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    generator = ClipGenerator(output_dir=str(tmp_path))
+    created = generator._create_clip(
+        str(source_video),
+        "00:00:00",
+        "00:00:03",
+        str(output_video),
+        "Speed Test",
+        speed=3.0,
+    )
+
+    assert created is True
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=nw=1:nk=1",
+            str(output_video),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    duration = float(result.stdout.strip())
+    assert duration < 1.5

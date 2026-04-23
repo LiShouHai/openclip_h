@@ -147,11 +147,12 @@ def test_editor_service_fastapi_routes(tmp_path):
 
     bounds = client.patch(
         f"/api/projects/{manifest.project_id}/clips/{clip_id}/bounds",
-        json={"start_time": "00:01:11", "end_time": "00:01:24"},
+        json={"start_time": "00:01:11", "end_time": "00:01:24", "speed": 1.5},
     )
     assert bounds.status_code == 200
     assert bounds.json()["time_range"] == "00:00:11 - 00:00:24"
     assert bounds.json()["absolute_time_range"] == "00:01:11 - 00:01:24"
+    assert bounds.json()["speed"] == 1.5
 
     rerender = client.post(f"/api/projects/{manifest.project_id}/clips/{clip_id}/rerender/boundary")
     assert rerender.status_code == 200
@@ -323,13 +324,15 @@ def test_boundary_worker_refreshes_post_processed_clip_when_subtitles_are_derive
     service = EditorService(projects_root=projects_root, jobs_dir=jobs_dir)
     calls = {'create_clip': 0, 'extract_subtitle': 0, 'subtitle_only': 0}
 
-    def fake_create_clip(self, source_video_path, start_time, end_time, output_path, title):
+    def fake_create_clip(self, source_video_path, start_time, end_time, output_path, title, speed=1.0):
         calls['create_clip'] += 1
+        calls['speed'] = speed
         Path(output_path).write_bytes(b'raw-updated')
         return True
 
-    def fake_extract_subtitle(self, subtitle_path, start_time, end_time, output_path):
+    def fake_extract_subtitle(self, subtitle_path, start_time, end_time, output_path, speed=1.0):
         calls['extract_subtitle'] += 1
+        calls['subtitle_speed'] = speed
         Path(output_path).write_text("1\n00:00:00,000 --> 00:00:01,000\nDerived\n", encoding='utf-8')
         return True
 
@@ -347,7 +350,9 @@ def test_boundary_worker_refreshes_post_processed_clip_when_subtitles_are_derive
     saved_clip = saved_manifest.clip_by_id(clip.clip_id)
 
     assert calls['create_clip'] == 1
+    assert calls['speed'] == 1.0
     assert calls['extract_subtitle'] >= 1
+    assert calls['subtitle_speed'] == 1.0
     assert calls['subtitle_only'] == 1
     assert Path(result['current_composed_clip']).parent.name == 'clips_post_processed'
     assert Path(saved_clip.asset_registry.current_composed_clip).parent.name == 'clips_post_processed'
@@ -364,7 +369,7 @@ def test_boundary_worker_keeps_manual_override_on_raw_clip_until_subtitle_rerend
     service = EditorService(projects_root=projects_root, jobs_dir=jobs_dir)
     calls = {'create_clip': 0, 'subtitle_only': 0}
 
-    def fake_create_clip(self, source_video_path, start_time, end_time, output_path, title):
+    def fake_create_clip(self, source_video_path, start_time, end_time, output_path, title, speed=1.0):
         calls['create_clip'] += 1
         Path(output_path).write_bytes(b'raw-updated')
         return True
@@ -385,6 +390,78 @@ def test_boundary_worker_keeps_manual_override_on_raw_clip_until_subtitle_rerend
     assert calls['subtitle_only'] == 0
     assert result['current_composed_clip'] == saved_clip.asset_registry.raw_clip
     assert saved_clip.asset_registry.current_composed_clip == saved_clip.asset_registry.raw_clip
+
+
+def test_boundary_worker_uses_selected_speed_for_raw_clip_and_subtitle_sidecars(tmp_path, monkeypatch):
+    manifest, projects_root, jobs_dir = _create_project(tmp_path)
+    manifest_path = Path(manifest.project_root) / 'editor_project.json'
+    clip = manifest.clips[0]
+    clip.speed = 2.0
+    clip.metadata['title_overlay_enabled'] = False
+    clip.subtitle_recipe.override_text = None
+    clip.asset_registry.subtitle_sidecars['active'] = clip.asset_registry.subtitle_sidecars['original']
+    save_manifest(manifest, manifest_path)
+
+    service = EditorService(projects_root=projects_root, jobs_dir=jobs_dir)
+    calls = {'create_speed': None, 'subtitle_speeds': []}
+
+    def fake_create_clip(self, source_video_path, start_time, end_time, output_path, title, speed=1.0):
+        calls['create_speed'] = speed
+        Path(output_path).write_bytes(b'raw-updated')
+        return True
+
+    def fake_extract_subtitle(self, subtitle_path, start_time, end_time, output_path, speed=1.0):
+        calls['subtitle_speeds'].append(speed)
+        Path(output_path).write_text("1\n00:00:00,000 --> 00:00:00,500\nDerived\n", encoding='utf-8')
+        return True
+
+    def fake_process_clip(self, mp4, srt, output, subtitle_translation=None):
+        Path(output).write_bytes(b'composed-updated')
+        return True
+
+    monkeypatch.setattr('core.clip_generator.ClipGenerator._create_clip', fake_create_clip, raising=False)
+    monkeypatch.setattr('core.clip_generator.ClipGenerator._extract_subtitle_from_file', fake_extract_subtitle, raising=False)
+    monkeypatch.setattr('core.subtitle_burner.SubtitleBurner._process_clip', fake_process_clip, raising=False)
+
+    service._boundary_worker(manifest_path, clip.clip_id, None, lambda *_args: None)
+
+    assert calls['create_speed'] == 2.0
+    assert calls['subtitle_speeds']
+    assert all(speed == 2.0 for speed in calls['subtitle_speeds'])
+
+
+def test_derived_subtitle_segments_are_retimed_for_selected_speed(tmp_path):
+    manifest, projects_root, jobs_dir = _create_project(tmp_path)
+    source_subtitle = tmp_path / "source_speed.srt"
+    source_subtitle.write_text(
+        "\n\n".join(
+            [
+                "1\n00:00:10,000 --> 00:00:12,000\nFirst original",
+                "2\n00:00:12,000 --> 00:00:16,000\nSecond original",
+            ]
+        ) + "\n",
+        encoding="utf-8",
+    )
+    manifest_path = Path(manifest.project_root) / "editor_project.json"
+    clip = manifest.clips[0]
+    clip.metadata["source_subtitle_path"] = str(source_subtitle)
+    clip.start_time = "00:00:10"
+    clip.end_time = "00:00:16"
+    clip.absolute_start_time = "00:01:10"
+    clip.absolute_end_time = "00:01:16"
+    clip.speed = 2.0
+    clip.subtitle_recipe.override_text = None
+    clip.subtitle_recipe.override_segments = []
+    save_manifest(manifest, manifest_path)
+
+    service = EditorService(projects_root=projects_root, jobs_dir=jobs_dir)
+
+    serialized = service.get_clip(manifest.project_id, clip.clip_id)
+
+    assert serialized["subtitle_segments"][0]["start_time"] == "00:00:00,000"
+    assert serialized["subtitle_segments"][0]["end_time"] == "00:00:01,000"
+    assert serialized["subtitle_segments"][1]["start_time"] == "00:00:01,000"
+    assert serialized["subtitle_segments"][1]["end_time"] == "00:00:03,000"
 
 
 def test_request_rerender_rejects_duplicate_pending_job(tmp_path):

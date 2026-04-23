@@ -162,13 +162,14 @@ def _derive_subtitle_segments_for_bounds(clip: EditorClip) -> list[dict[str, str
 
     clip_start = parse_timecode_to_seconds(clip.start_time)
     clip_end = parse_timecode_to_seconds(clip.end_time)
+    speed = max(float(getattr(clip, "speed", 1.0) or 1.0), 0.001)
     derived_segments: list[dict[str, str]] = []
     for segment in segments:
         seg_start = generator._time_to_seconds_srt(str(segment.get("start_time")))
         seg_end = generator._time_to_seconds_srt(str(segment.get("end_time")))
         if seg_end > clip_start and seg_start < clip_end:
-            new_start = max(0.0, seg_start - clip_start)
-            new_end = max(new_start + 0.1, seg_end - clip_start)
+            new_start = max(0.0, seg_start - clip_start) / speed
+            new_end = max(new_start + 0.1, (seg_end - clip_start) / speed)
             derived_segments.append(
                 {
                     "index": len(derived_segments) + 1,
@@ -302,16 +303,26 @@ class EditorService:
         manifest, _ = self._load_manifest(project_id)
         return self._serialize_clip(manifest.clip_by_id(clip_id))
 
-    def update_clip_bounds(self, project_id: str, clip_id: str, start: str | float, end: str | float) -> dict[str, Any]:
+    def update_clip_bounds(
+        self,
+        project_id: str,
+        clip_id: str,
+        start: str | float,
+        end: str | float,
+        speed: float | None = None,
+    ) -> dict[str, Any]:
         manifest, manifest_path = self._load_manifest(project_id)
         clip = manifest.clip_by_id(clip_id)
         absolute_start_seconds = parse_timecode_to_seconds(start)
         absolute_end_seconds = parse_timecode_to_seconds(end)
+        next_speed = float(speed if speed is not None else clip.speed)
         max_duration = manifest.source_video_duration or clip.source_video_duration
         if absolute_start_seconds < 0:
             raise ValueError("Clip start must be >= 0")
         if absolute_end_seconds <= absolute_start_seconds:
             raise ValueError("Clip end must be greater than start")
+        if next_speed <= 0:
+            raise ValueError("Clip speed must be greater than 0")
         if max_duration is not None and absolute_end_seconds > float(max_duration):
             raise ValueError("Clip end exceeds source duration")
         local_start_seconds = absolute_start_seconds - float(clip.part_offset_seconds or 0.0)
@@ -330,6 +341,7 @@ class EditorService:
         clip.absolute_end_time = format_seconds_as_timecode(absolute_end_seconds)
         clip.absolute_time_range = f"{clip.absolute_start_time} - {clip.absolute_end_time}"
         clip.duration = round(absolute_end_seconds - absolute_start_seconds, 3)
+        clip.speed = next_speed
         clip.recovery.dirty = True
         clip.recovery.cover_dirty = True
         clip.recovery.recovery_state = "dirty"
@@ -436,19 +448,38 @@ class EditorService:
         raw_clip_path.parent.mkdir(parents=True, exist_ok=True)
         generator = ClipGenerator(output_dir=str(raw_clip_path.parent))
         progress_callback("Recutting clip", 25)
-        if not generator._create_clip(clip.source_video_path, clip.start_time, clip.end_time, str(raw_clip_path), clip.title):
+        if not generator._create_clip(
+            clip.source_video_path,
+            clip.start_time,
+            clip.end_time,
+            str(raw_clip_path),
+            clip.title,
+            speed=clip.speed,
+        ):
             raise RuntimeError("Failed to recut clip")
         source_subtitle_path = clip.metadata.get("source_subtitle_path")
         subtitle_sidecars = dict(clip.asset_registry.subtitle_sidecars)
         progress_callback("Refreshing subtitle sidecars", 55)
         if source_subtitle_path:
             original_path = Path(subtitle_sidecars.get("original") or raw_clip_path.with_suffix('.srt'))
-            if generator._extract_subtitle_from_file(source_subtitle_path, clip.start_time, clip.end_time, str(original_path)):
+            if generator._extract_subtitle_from_file(
+                source_subtitle_path,
+                clip.start_time,
+                clip.end_time,
+                str(original_path),
+                speed=clip.speed,
+            ):
                 subtitle_sidecars["original"] = str(original_path)
             whisper_path = subtitle_sidecars.get("whisper")
             if whisper_path:
                 whisper_target = Path(whisper_path)
-                if generator._extract_subtitle_from_file(source_subtitle_path, clip.start_time, clip.end_time, str(whisper_target)):
+                if generator._extract_subtitle_from_file(
+                    source_subtitle_path,
+                    clip.start_time,
+                    clip.end_time,
+                    str(whisper_target),
+                    speed=clip.speed,
+                ):
                     subtitle_sidecars["whisper"] = str(whisper_target)
             subtitle_sidecars["active"] = subtitle_sidecars.get("whisper") or subtitle_sidecars.get("original")
         clip.asset_registry.raw_clip = str(raw_clip_path)
@@ -708,7 +739,13 @@ def create_app(projects_root: str | Path = "processed_videos", jobs_dir: str | P
     @app.post('/projects/{project_id}/clips/{clip_id}/bounds')
     def update_bounds(project_id: str, clip_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         try:
-            return service.update_clip_bounds(project_id, clip_id, payload.get('start_time') or payload.get('start'), payload.get('end_time') or payload.get('end'))
+            return service.update_clip_bounds(
+                project_id,
+                clip_id,
+                payload.get('start_time') or payload.get('start'),
+                payload.get('end_time') or payload.get('end'),
+                payload.get('speed'),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from None
         except ValueError as exc:

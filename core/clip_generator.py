@@ -328,6 +328,7 @@ class ClipGenerator:
         start_time: str,
         end_time: str,
         output_path: str,
+        speed: float = 1.0,
     ) -> bool:
         """Extract subtitle segments from an explicit SRT file for a clip's time range."""
         segments = self._parse_srt_file(subtitle_file)
@@ -344,8 +345,8 @@ class ClipGenerator:
             seg_end = self._time_to_seconds_srt(seg['end_time'])
 
             if seg_end > clip_start and seg_start < clip_end:
-                new_start = max(0.0, seg_start - clip_start)
-                new_end = max(new_start + 0.1, seg_end - clip_start)
+                new_start = max(0.0, seg_start - clip_start) / max(speed, 0.001)
+                new_end = max(new_start + 0.1, (seg_end - clip_start) / max(speed, 0.001))
 
                 clip_segments.append({
                     'index': len(clip_segments) + 1,
@@ -366,6 +367,18 @@ class ClipGenerator:
 
         logger.info(f"✓ Generated subtitle file with {len(clip_segments)} segments")
         return True
+
+    @staticmethod
+    def _build_audio_tempo_filter(speed: float) -> str:
+        if speed <= 0:
+            raise ValueError("speed must be positive")
+        remaining = speed
+        factors: list[float] = []
+        while remaining > 2.0:
+            factors.append(2.0)
+            remaining /= 2.0
+        factors.append(remaining)
+        return ",".join(f"atempo={factor:.3f}" for factor in factors)
     
     def _time_to_seconds(self, time_str: str) -> int:
         """Convert MM:SS or HH:MM:SS to seconds"""
@@ -590,7 +603,7 @@ class ClipGenerator:
         )
 
     def _create_clip(self, input_video: str, start_time: str,
-                    end_time: str, output_path: str, title: str) -> bool:
+                    end_time: str, output_path: str, title: str, speed: float = 1.0) -> bool:
         """Create a video clip using ffmpeg.
 
         start_time/end_time may be HH:MM:SS or HH:MM:SS.mmm (when snapped).
@@ -605,12 +618,12 @@ class ClipGenerator:
             cmd = [
                 'ffmpeg',
                 '-ss', start_time,
-                '-i', input_video,
                 '-t', f"{duration:.3f}",
+                '-i', input_video,
                 '-c:v', 'libx264',
                 '-c:a', 'aac',
-                '-vf', 'setpts=PTS-STARTPTS',
-                '-af', 'asetpts=PTS-STARTPTS',
+                '-vf', f'setpts=(PTS-STARTPTS)/{speed:.3f}',
+                '-af', self._build_audio_tempo_filter(speed),
                 '-movflags', '+faststart',
                 '-y',
                 output_path

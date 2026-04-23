@@ -21,6 +21,7 @@ const manifestProject = {
       absolute_start_time: '00:00:05',
       absolute_end_time: '00:00:20',
       absolute_time_range: '00:00:05 - 00:00:20',
+      speed: 1,
       asset_registry: { current_composed_clip: 'clips_post_processed/clip-real-1.mp4' },
       subtitle_segments: [
         { start_time: '00:00:00,000', end_time: '00:00:02,500', text: 'Loaded subtitle' },
@@ -45,6 +46,7 @@ const manifestProject = {
       absolute_start_time: '00:00:25',
       absolute_end_time: '00:00:40',
       absolute_time_range: '00:00:25 - 00:00:40',
+      speed: 1,
       asset_registry: { current_composed_clip: 'clips_post_processed/clip-real-2.mp4' },
       subtitle_segments: [
         { start_time: '00:00:00,000', end_time: '00:00:03,000', text: 'Second subtitle' },
@@ -280,6 +282,29 @@ describe('OpenClip editor shell', () => {
     expect(screen.getByLabelText(zh('clipStart'))).toHaveValue('6')
   })
 
+  it('changing playback speed updates output duration and reset restores the saved speed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifestProject }))
+    const user = userEvent.setup()
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Loaded Clip' })
+    const speedSelect = screen.getByLabelText(zh('playbackSpeed'))
+
+    expect(speedSelect).toHaveValue('1')
+    expect(screen.getByText('00:15.0')).toBeInTheDocument()
+
+    fireEvent.change(speedSelect, { target: { value: '2' } })
+
+    expect(speedSelect).toHaveValue('2')
+    expect(screen.getByText('00:07.5')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: zh('resetClipDraft') }))
+
+    expect(screen.getByLabelText(zh('playbackSpeed'))).toHaveValue('1')
+    expect(screen.getByText('00:15.0')).toBeInTheDocument()
+  })
+
   it('resetting the clip draft realigns the timeline preview to the saved clip bounds', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifestProject }))
     const user = userEvent.setup()
@@ -384,7 +409,14 @@ describe('OpenClip editor shell', () => {
     const fetchMock = vi.fn()
     fetchMock
       .mockResolvedValueOnce({ ok: true, json: async () => manifestProject })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockImplementationOnce(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          start_time: '00:00:06.000',
+          end_time: '00:00:20.000',
+          speed: 2,
+        })
+        return { ok: true, json: async () => ({}) }
+      })
       .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ job_id: 'job-boundary-refresh' }) })
       .mockResolvedValueOnce({
@@ -396,6 +428,7 @@ describe('OpenClip editor shell', () => {
             start_time: '00:00:06',
             absolute_start_time: '00:00:06',
             absolute_time_range: '00:00:06 - 00:00:20',
+            speed: 2,
             subtitle_segments: [
               { start_time: '00:00:00,000', end_time: '00:00:01,200', text: 'Boundary-synced cue' },
               { start_time: '00:00:01,200', end_time: '00:00:02,400', text: 'Follow-up synced cue' },
@@ -417,6 +450,7 @@ describe('OpenClip editor shell', () => {
             start_time: '00:00:06',
             absolute_start_time: '00:00:06',
             absolute_time_range: '00:00:06 - 00:00:20',
+            speed: 2,
             subtitle_segments: [
               { start_time: '00:00:00,000', end_time: '00:00:01,200', text: 'Boundary-synced cue' },
               { start_time: '00:00:01,200', end_time: '00:00:02,400', text: 'Follow-up synced cue' },
@@ -437,11 +471,13 @@ describe('OpenClip editor shell', () => {
     await user.clear(subtitleField)
     await user.type(subtitleField, 'Manual override before confirming boundary')
     fireEvent.change(screen.getByLabelText(zh('clipStart')), { target: { value: '6' } })
+    fireEvent.change(screen.getByLabelText(zh('playbackSpeed')), { target: { value: '2' } })
     await user.click(screen.getByRole('button', { name: zh('queueRerender', { operation: zh('operationBoundary') }) }))
 
     await waitFor(() => expect(screen.getByDisplayValue('Boundary-synced cue')).toBeInTheDocument())
     expect(screen.getByDisplayValue('Follow-up synced cue')).toBeInTheDocument()
     expect(screen.queryByDisplayValue('Manual override before confirming boundary')).toBeNull()
+    expect(screen.getByLabelText(zh('playbackSpeed'))).toHaveValue('2')
     await waitFor(() => expect(getTimelinePreviewVideo()?.currentTime).toBe(6))
   })
 

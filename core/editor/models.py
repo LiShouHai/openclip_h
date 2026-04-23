@@ -271,6 +271,7 @@ class EditorClip:
     cover_recipe: CoverRecipe = field(default_factory=lambda: CoverRecipe(text=""))
     recovery: EditorRecoveryState = field(default_factory=EditorRecoveryState)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    speed: float = 1.0
     updated_at: str = field(default_factory=utc_now_iso)
 
     @classmethod
@@ -292,6 +293,7 @@ class EditorClip:
             original_start_time=payload.get("original_start_time", payload.get("start_time", "00:00:00")),
             original_end_time=payload.get("original_end_time", payload.get("end_time", "00:00:00")),
             duration=payload.get("duration"),
+            speed=float(payload.get("speed", 1.0) or 1.0),
             time_range=payload.get("time_range", ""),
             original_time_range=payload.get("original_time_range", ""),
             absolute_time_range=payload.get("absolute_time_range", payload.get("time_range", "")),
@@ -321,6 +323,7 @@ class EditorClip:
             "original_start_time": self.original_start_time,
             "original_end_time": self.original_end_time,
             "duration": self.duration,
+            "speed": self.speed,
             "time_range": self.time_range,
             "original_time_range": self.original_time_range,
             "absolute_time_range": self.absolute_time_range,

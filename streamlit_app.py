@@ -1330,158 +1330,166 @@ def handle_retry(job_id):
     else:
         st.session_state.retry_error = True
 
-# ============================================================================
-# JOB LIST SECTION
-# ============================================================================
-uploads_root = Path(st.session_state.uploads_root)
-owner_uploads = list_uploads_for_owner(uploads_root, current_owner_session_id)
+@st.fragment(run_every="2s")
+def render_runtime_dashboard():
+    uploads_root = Path(st.session_state.uploads_root)
 
-st.header("📁 My Uploaded Files")
-if owner_uploads:
-    for upload in owner_uploads:
-        upload_cols = st.columns([4, 2, 1])
-        with upload_cols[0]:
-            st.write(f"**{upload['original_filename']}**")
-            st.caption(Path(upload['staged_path']).name)
-        with upload_cols[1]:
-            st.caption(f"Created: {upload.get('created_at', 'unknown')}")
-            if not upload.get('exists', True):
-                st.warning('Missing on disk')
-        with upload_cols[2]:
-            delete_disabled = job_manager.has_active_upload_reference(upload['upload_id'])
-            if st.button('🗑️ Delete Upload', key=f"delete_upload_{upload['upload_id']}", use_container_width=True, disabled=delete_disabled):
-                job_manager.mark_upload_deleted(upload['upload_id'])
-                delete_upload_record(upload)
-                st.rerun()
-            if delete_disabled:
-                st.caption('In use by an active job')
-else:
-    st.info('No uploaded files for this browser session yet.')
+    completed_jobs = []
+    for job_id in st.session_state.processing_job_ids[:]:
+        job = job_manager.get_job(job_id)
+        if job and job.status.value in ['completed', 'failed', 'cancelled']:
+            completed_jobs.append(job)
+            st.session_state.processing_job_ids.remove(job_id)
 
-st.divider()
-st.header("📋 Your Jobs")
+    for job in completed_jobs:
+        if job.status.value == 'completed':
+            st.success(f"✅ Job completed: {job.video_source[:50]}...")
+            if not _is_editor_rerender_job(job):
+                data['processing_result'] = job.result
+        elif job.status.value == 'failed':
+            st.error(f"❌ Job failed: {job.video_source[:50]}... - {job.error}")
+        elif job.status.value == 'cancelled':
+            st.warning(f"⏹️ Job cancelled: {job.video_source[:50]}...")
 
-jobs = job_manager.list_jobs(limit=20, owner_session_id=current_owner_session_id)
+    st.session_state.processing = len(st.session_state.processing_job_ids) > 0
 
-if jobs:
-    # Show stats
-    stats = job_manager.get_stats(owner_session_id=current_owner_session_id)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total", stats['total'])
-    col2.metric("Processing", stats['processing'])
-    col3.metric("Completed", stats['completed'])
-    col4.metric("Failed", stats['failed'])
-    
+    owner_uploads = list_uploads_for_owner(uploads_root, current_owner_session_id)
+
+    st.header("📁 My Uploaded Files")
+    if owner_uploads:
+        for upload in owner_uploads:
+            upload_cols = st.columns([4, 2, 1])
+            with upload_cols[0]:
+                st.write(f"**{upload['original_filename']}**")
+                st.caption(Path(upload['staged_path']).name)
+            with upload_cols[1]:
+                st.caption(f"Created: {upload.get('created_at', 'unknown')}")
+                if not upload.get('exists', True):
+                    st.warning('Missing on disk')
+            with upload_cols[2]:
+                delete_disabled = job_manager.has_active_upload_reference(upload['upload_id'])
+                if st.button('🗑️ Delete Upload', key=f"delete_upload_{upload['upload_id']}", use_container_width=True, disabled=delete_disabled):
+                    job_manager.mark_upload_deleted(upload['upload_id'])
+                    delete_upload_record(upload)
+                    st.rerun()
+                if delete_disabled:
+                    st.caption('In use by an active job')
+    else:
+        st.info('No uploaded files for this browser session yet.')
+
     st.divider()
-    
-    # Show each job
-    for job in jobs:
-        is_editor_rerender = _is_editor_rerender_job(job)
-        status_emoji = {
-            'pending': '⏳',
-            'processing': '🔄',
-            'completed': '✅',
-            'failed': '❌',
-            'cancelled': '⏹️'
-        }.get(job.status.value, '❓')
-        
-        # Truncate video source for display
-        display_source = job.video_source if len(job.video_source) <= 60 else job.video_source[:57] + '...'
-        
-        with st.expander(f"{status_emoji} {job.status.value.upper()} - {display_source}", expanded=(job.status.value == 'processing')):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                st.write(f"**Job ID:** `{job.id[:8]}...`")
-                st.write(f"**Created:** {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                
-                # Create a placeholder for duration to prevent ghost rendering
-                duration_placeholder = st.empty()
-                
-                # Only show duration for finished jobs
-                if job.status.value in ['completed', 'failed', 'cancelled']:
-                    if job.completed_at and job.started_at:
-                        duration = (job.completed_at - job.started_at).total_seconds()
-                        duration_placeholder.write(f"**Duration:** {duration:.1f}s")
-                else:
-                    # Explicitly clear the placeholder for processing/pending jobs
-                    duration_placeholder.empty()
-            
-            with col2:
-                if job.status.value == 'processing':
-                    st.progress(job.progress / 100)
-                    st.caption(f"{job.current_step}")
-                elif job.status.value == 'completed':
-                    st.success("Editor rerender completed!" if is_editor_rerender else "Processing completed!")
-                    if is_editor_rerender:
-                        operation = (job.options or {}).get('operation')
-                        clip_id = (job.options or {}).get('clip_id')
-                        if operation:
-                            st.write(f"**Operation:** {operation}")
-                        if clip_id:
-                            st.caption(f"Clip: {clip_id[:8]}...")
-                    elif job.result and job.result.get('processing_time'):
-                        st.write(f"**Time:** {job.result['processing_time']:.1f}s")
-                elif job.status.value == 'failed':
-                    st.error(f"Error: {job.error}")
-                elif job.status.value == 'cancelled':
-                    st.warning("Job was cancelled")
-            
-            with col3:
-                # Use placeholder to prevent ghost buttons
-                button_placeholder = st.empty()
-                
-                if job.status.value == 'completed':
-                    # Show job-specific actions and Delete button
-                    with button_placeholder.container():
-                        if is_editor_rerender:
-                            if st.button("🛠️ Open in Editor", key=f"open_editor_job_{job.id}", use_container_width=True):
-                                _launch_editor_for_job(job)
-                        else:
-                            if st.button("📊 View", key=f"view_{job.id}", use_container_width=True):
-                                # Load result and display
-                                data['processing_result'] = job.result
-                                st.rerun()
-                        if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
-                            job_manager.delete_job(job.id)
-                            st.rerun()
-                elif job.status.value == 'processing':
-                    with button_placeholder.container():
-                        # Check if this job is being tracked
-                        is_tracked = job.id in st.session_state.processing_job_ids
-                        
-                        if is_tracked:
-                            # Show "Watching" indicator (disabled button)
-                            st.button("✓ Watching", key=f"watching_{job.id}", use_container_width=True, disabled=True)
-                        else:
-                            # Show "Watch Progress" button
-                            if st.button("👁️ Watch Progress", key=f"watch_{job.id}", use_container_width=True):
-                                # Start tracking this job
-                                st.session_state.processing_job_ids = [job.id]
-                                st.session_state.processing = True
-                                st.rerun()
-                        
-                        # Always show Cancel button
-                        if st.button("⏹️ Cancel", key=f"cancel_{job.id}", use_container_width=True):
-                            job_manager.cancel_job(job.id)
-                            st.rerun()
-                elif job.status.value in ['failed', 'cancelled', 'pending']:
-                    with button_placeholder.container():
-                        # Show Retry button for failed or cancelled jobs
-                        if job.status.value in ['failed', 'cancelled']:
-                            source_deleted = bool((job.options or {}).get('source_deleted'))
-                            if st.button("🔄 Retry", key=f"retry_{job.id}", use_container_width=True, on_click=handle_retry, args=(job.id,), disabled=source_deleted):
-                                pass  # Callback handles the retry
-                            if source_deleted:
-                                st.caption('Retry unavailable: source upload was deleted.')
-                        
-                        if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
-                            job_manager.delete_job(job.id)
-                            st.rerun()
-else:
-    st.info("No jobs yet. Process a video below to get started!")
+    st.header("📋 Your Jobs")
 
-st.divider()
+    jobs = job_manager.list_jobs(limit=20, owner_session_id=current_owner_session_id)
+
+    if jobs:
+        stats = job_manager.get_stats(owner_session_id=current_owner_session_id)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total", stats['total'])
+        col2.metric("Processing", stats['processing'])
+        col3.metric("Completed", stats['completed'])
+        col4.metric("Failed", stats['failed'])
+
+        st.divider()
+
+        for job in jobs:
+            is_editor_rerender = _is_editor_rerender_job(job)
+            status_emoji = {
+                'pending': '⏳',
+                'processing': '🔄',
+                'completed': '✅',
+                'failed': '❌',
+                'cancelled': '⏹️'
+            }.get(job.status.value, '❓')
+
+            display_source = job.video_source if len(job.video_source) <= 60 else job.video_source[:57] + '...'
+
+            with st.expander(f"{status_emoji} {job.status.value.upper()} - {display_source}", expanded=(job.status.value == 'processing')):
+                col1, col2, col3 = st.columns([2, 2, 1])
+
+                with col1:
+                    st.write(f"**Job ID:** `{job.id[:8]}...`")
+                    st.write(f"**Created:** {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                    duration_placeholder = st.empty()
+                    if job.status.value in ['completed', 'failed', 'cancelled']:
+                        if job.completed_at and job.started_at:
+                            duration = (job.completed_at - job.started_at).total_seconds()
+                            duration_placeholder.write(f"**Duration:** {duration:.1f}s")
+                    else:
+                        duration_placeholder.empty()
+
+                with col2:
+                    if job.status.value == 'processing':
+                        st.progress(job.progress / 100)
+                        st.caption(f"{job.current_step}")
+                    elif job.status.value == 'completed':
+                        st.success("Editor rerender completed!" if is_editor_rerender else "Processing completed!")
+                        if is_editor_rerender:
+                            operation = (job.options or {}).get('operation')
+                            clip_id = (job.options or {}).get('clip_id')
+                            if operation:
+                                st.write(f"**Operation:** {operation}")
+                            if clip_id:
+                                st.caption(f"Clip: {clip_id[:8]}...")
+                        elif job.result and job.result.get('processing_time'):
+                            st.write(f"**Time:** {job.result['processing_time']:.1f}s")
+                    elif job.status.value == 'failed':
+                        st.error(f"Error: {job.error}")
+                    elif job.status.value == 'cancelled':
+                        st.warning("Job was cancelled")
+
+                with col3:
+                    button_placeholder = st.empty()
+
+                    if job.status.value == 'completed':
+                        with button_placeholder.container():
+                            if is_editor_rerender:
+                                if st.button("🛠️ Open in Editor", key=f"open_editor_job_{job.id}", use_container_width=True):
+                                    _launch_editor_for_job(job)
+                            else:
+                                if st.button("📊 View", key=f"view_{job.id}", use_container_width=True):
+                                    data['processing_result'] = job.result
+                                    st.rerun()
+                            if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
+                                job_manager.delete_job(job.id)
+                                st.rerun()
+                    elif job.status.value == 'processing':
+                        with button_placeholder.container():
+                            is_tracked = job.id in st.session_state.processing_job_ids
+
+                            if is_tracked:
+                                st.button("✓ Watching", key=f"watching_{job.id}", use_container_width=True, disabled=True)
+                            else:
+                                if st.button("👁️ Watch Progress", key=f"watch_{job.id}", use_container_width=True):
+                                    st.session_state.processing_job_ids = [job.id]
+                                    st.session_state.processing = True
+                                    st.rerun()
+
+                            if st.button("⏹️ Cancel", key=f"cancel_{job.id}", use_container_width=True):
+                                job_manager.cancel_job(job.id)
+                                st.rerun()
+                    elif job.status.value in ['failed', 'cancelled', 'pending']:
+                        with button_placeholder.container():
+                            if job.status.value in ['failed', 'cancelled']:
+                                source_deleted = bool((job.options or {}).get('source_deleted'))
+                                if st.button("🔄 Retry", key=f"retry_{job.id}", use_container_width=True, on_click=handle_retry, args=(job.id,), disabled=source_deleted):
+                                    pass
+                                if source_deleted:
+                                    st.caption('Retry unavailable: source upload was deleted.')
+
+                            if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
+                                job_manager.delete_job(job.id)
+                                st.rerun()
+    else:
+        st.info("No jobs yet. Process a video below to get started!")
+
+    st.divider()
+
+    if completed_jobs:
+        st.rerun()
+
+
+render_runtime_dashboard()
 
 # ============================================================================
 # CUSTOM PROMPT EDITOR (if enabled)
@@ -1540,39 +1548,6 @@ if use_custom_prompt:
         st.info(f"{t['current_saved_prompt']} {Path(custom_prompt_file).name}")
     
     st.divider()
-
-# ============================================================================
-# CHECK CURRENT JOB STATUS (must be before progress display)
-# ============================================================================
-# Check all processing jobs for completion
-completed_jobs = []
-for job_id in st.session_state.processing_job_ids[:]:  # Copy list to iterate safely
-    job = job_manager.get_job(job_id)
-    if job:
-        # Check if job finished
-        if job.status.value in ['completed', 'failed', 'cancelled']:
-            completed_jobs.append(job)
-            st.session_state.processing_job_ids.remove(job_id)
-
-# Show completion messages for finished jobs
-for job in completed_jobs:
-    if job.status.value == 'completed':
-        st.success(f"✅ Job completed: {job.video_source[:50]}...")
-        if not _is_editor_rerender_job(job):
-            # Load result into saved results (only the last completed job)
-            data['processing_result'] = job.result
-    elif job.status.value == 'failed':
-        st.error(f"❌ Job failed: {job.video_source[:50]}... - {job.error}")
-    elif job.status.value == 'cancelled':
-        st.warning(f"⏹️ Job cancelled: {job.video_source[:50]}...")
-
-# Update processing state
-st.session_state.processing = len(st.session_state.processing_job_ids) > 0
-
-# Rerun if we just completed jobs to update the UI
-if completed_jobs:
-    time.sleep(2)
-    st.rerun()
 
 # ============================================================================
 # BUTTON CLICK HANDLERS
@@ -1805,11 +1780,3 @@ with col2:
         </button>
     </a>
     """, unsafe_allow_html=True)
-
-# ============================================================================
-# AUTO-REFRESH WHILE PROCESSING
-# ============================================================================
-# This must be at the very end to refresh the entire page
-if st.session_state.processing:
-    time.sleep(2)
-    st.rerun()

@@ -1,6 +1,6 @@
 [project]
 name = "openclip"
-version = "0.4.9"
+version = "0.6.0"
 description = "Video highlight extraction with transcript generation"
 readme = "README.md"
 requires-python = ">=3.11"
